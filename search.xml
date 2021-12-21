@@ -1,0 +1,818 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  <entry>
+    <title>一致性哈希</title>
+    <url>/2021/11/09/alg/consistent-hash/</url>
+    <content><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>在介绍一致性哈希之前，首先来看看集群部署可能发生的问题：比如说我现在有5台 <code>Redis</code> 服务器，正常运行了很久，很不巧有一天A服务器崩溃了，这个时候还有4台服务器，系统还可以正常运行，原来发送到A服务器的请求我们肯定要想办法进行重定向吧，如果说我们使用一般的哈希函数进行分配，无疑是 <code>hash(key) % num</code>，不过因为 <code>num</code> 现在变成了 <code>num-1</code>，那么很有可能所有的请求都会发生改变打到不同的服务器上，原来发送到B的请求重新处理之后可能发送到了C服务器了。</p>
+<span id="more"></span>
+
+<img src="hash.svg">
+
+<p>为了规避这种大迁移情况，我们可以使用一致性哈希。</p>
+<h3 id="算法原理"><a href="#算法原理" class="headerlink" title="算法原理"></a>算法原理</h3><p>一致性哈希算法使用的也是取模，但是不同于普通的哈希，我们不是对服务器的数量进行取模，而是对 <code>2^32</code> 取模，也就是相当于对一个固定的数进行取模，我们可以这样认为：所有的哈希值空间构成了一个圆环，如下图：</p>
+<img src="1.svg">
+
+<p>如果我们有多个服务器的，根据某个属性计算哈希值，比如说IP地址，映射到圆环上对应节点，假设说现在我有三个节点，映射之后的结果如下: </p>
+<img src="2.svg">
+
+<p>当某个请求发送过来的时候，根据其中的某个属性计算哈希值，比如说<code>HTTP</code>请求的路径，头部信息等，假设映射到如下的位置</p>
+<img src="3.svg">
+
+<p>根据映射到的位置，我们选择<code>顺时针旋转</code>遇到的第一个服务器节点作为该请求所选择的服务器节点，也就是 <code>B</code> 服务器。</p>
+<p>当我们的某台服务器崩溃的时候，比如 <code>B</code> 崩溃了，那么 <code>A</code> 请求根据一致性哈希原理，会分配到服务器节点 <code>C</code>，更一般的，<code>(A, B]</code> 范围中的请求都会重新分配到服务器节点 <code>C</code>，而其他的请求都不会发生改变，这和之前所述的普通哈希函数不同。</p>
+<p>但是上述的算法在某些情况下表现不好，比如说下面的这种服务器节点分布：</p>
+<img src="4.svg">
+
+<p><code>C</code> 一个节点就占用了大概<code>2/3</code>的取值空间，导致请求分配非常不均匀，针对这种情况，我们可以通过设置多个节点副本，如下：</p>
+<img src="5.svg">
+
+<p>这样处理之后，比之前而言要均匀了很多，理论来说，副本的数量越多，分配的越均匀，但是同时也会增加管理的难度，所以不宜设置过大。</p>
+<h3 id="算法实现"><a href="#算法实现" class="headerlink" title="算法实现"></a>算法实现</h3><p>先简单说一下思路吧，按照上面的原理，我们需要：</p>
+<ul>
+<li>hash 函数：能够支持多副本</li>
+<li>服务器节点映射：哈希值-&gt;服务器节点</li>
+<li>映射的值范围：类似上面的取值圆环<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> consistent <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 副本数量</span></span><br><span class="line">	replicas <span class="keyword">int</span></span><br><span class="line">	<span class="comment">// 所有的server 节点</span></span><br><span class="line">	nodes <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">struct</span>&#123;&#125;</span><br><span class="line">	<span class="comment">// 节点所对应的server</span></span><br><span class="line">	servers <span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">string</span></span><br><span class="line">	<span class="comment">// 保存所有的索引，也就是在hash圆环上的节点</span></span><br><span class="line">	circle uints <span class="comment">// type uints []uint32</span></span><br><span class="line">	<span class="comment">// 采用的hash算法</span></span><br><span class="line">	<span class="comment">// hash 方法可能直接决定节点的分布情况</span></span><br><span class="line">	hash Hash</span><br><span class="line">	sync.RWMutex</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+当一个服务器节点进行映射的时候，会得到多个哈希值(多个副本)，这些哈希值在圆环上对应一个位置</li>
+</ul>
+<img src="6.svg">
+
+<p>但是我们没必要保存一个 <code>2^31-1</code> 大的数组，我们只需要维护一个<code>有序数组</code>就好了，当一个请求过来的时候，我们只需要获取到它的哈希值顺时针的下一个节点哈希值对应的服务器节点就好了</p>
+<h4 id="哈希函数"><a href="#哈希函数" class="headerlink" title="哈希函数"></a>哈希函数</h4><p>哈希函数应该能够支持多副本，方式有很多种，这里采用一个简单的方式，也可以自定义</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;hash/fnv&quot;</span></span><br><span class="line">	<span class="string">&quot;strconv&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="comment">// replica</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">hash</span><span class="params">(key <span class="keyword">string</span>, num <span class="keyword">int</span>)</span> <span class="title">uint32</span></span> &#123;</span><br><span class="line">	h := fnv.New32()</span><br><span class="line">	h.Write([]<span class="keyword">byte</span>(key + <span class="string">&#x27;-&#x27;</span>+ strconv.Itoa(num)))</span><br><span class="line">	<span class="keyword">return</span> h.Sum32()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="服务器节点映射"><a href="#服务器节点映射" class="headerlink" title="服务器节点映射"></a>服务器节点映射</h4><p>服务器节点进行哈希之后，需要保存对应的哈希值，这样可以通过哈希值获取到对应的服务器</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">servers := <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">string</span>)</span><br></pre></td></tr></table></figure>
+
+<h4 id="映射值的范围"><a href="#映射值的范围" class="headerlink" title="映射值的范围"></a>映射值的范围</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">circle := <span class="built_in">make</span>([]<span class="keyword">uint32</span>, <span class="number">0</span>)</span><br></pre></td></tr></table></figure>
+
+<p>每一次添加节点的时候，都需要进行重新排序：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">for</span> i := <span class="number">0</span>; i &lt; replicas; i++ &#123;</span><br><span class="line">  key := hash(node, i)</span><br><span class="line">  circle = <span class="built_in">append</span>(c.circle, key)</span><br><span class="line">  servers[key] = node</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">// 重新进行排序</span></span><br><span class="line">sort.Sort(c.circle)</span><br></pre></td></tr></table></figure>
+<p>而在删除节点的时候，我们只需要删除对应节点的哈希值，顺序维持不变即可。</p>
+<h4 id="支持的方法"><a href="#支持的方法" class="headerlink" title="支持的方法"></a>支持的方法</h4><p>主要支持的方法不是很多，基本的有：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> ConsistentHasher <span class="keyword">interface</span> &#123;</span><br><span class="line">	<span class="comment">// 添加节点</span></span><br><span class="line">	Add(slot <span class="keyword">string</span>)</span><br><span class="line">	<span class="comment">// 删除节点</span></span><br><span class="line">	Delete(slot <span class="keyword">string</span>)</span><br><span class="line">	<span class="comment">// 数据对应的节点</span></span><br><span class="line">	Get(key <span class="keyword">string</span>) <span class="keyword">string</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>添加服务器节点上面已经说了，删除节点的主要代码如下：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *consistent)</span> <span class="title">Delete</span><span class="params">(node <span class="keyword">string</span>)</span></span> &#123;</span><br><span class="line">	c.Lock()</span><br><span class="line">	<span class="keyword">defer</span> c.Unlock()</span><br><span class="line">	<span class="comment">// 删除节点</span></span><br><span class="line">	<span class="built_in">delete</span>(c.nodes, node)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 因为在数组中删除元素不方便，这里先记录一下需要删除的数据</span></span><br><span class="line">	<span class="comment">// 然后如果在这里面的数据就不再添加到新的记录中</span></span><br><span class="line">	memo := <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">struct</span>&#123;&#125;)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 删除hash圆环中的值</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; c.replicas; i++ &#123;</span><br><span class="line">		key := c.hashKey(node, i)</span><br><span class="line">		memo[key] = <span class="keyword">struct</span>&#123;&#125;&#123;&#125;</span><br><span class="line">		<span class="built_in">delete</span>(c.servers, key)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 创建一个新的保存</span></span><br><span class="line">	newCircle := <span class="built_in">make</span>(uints, <span class="number">0</span>, c.circle.Len()-c.replicas)</span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; c.circle.Len(); i++ &#123;</span><br><span class="line">		<span class="keyword">if</span> _, ok := memo[c.circle[i]]; !ok &#123;</span><br><span class="line">			newCircle = <span class="built_in">append</span>(newCircle, c.circle[i])</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	c.circle = newCircle</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>当我们需要获取一个请求对应的服务器节点的时候，我们只要搜索到顺序针第一个服务器节点即可，因为哈希值有序，这里可以采用<code>二分查找</code>的方式</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// Get 获取到属于的server节点</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *consistent)</span> <span class="title">Get</span><span class="params">(name <span class="keyword">string</span>)</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	c.RLock()</span><br><span class="line">	<span class="keyword">defer</span> c.RUnlock()</span><br><span class="line">	<span class="comment">// 首先将hash找到</span></span><br><span class="line">	key := c.hash(name)</span><br><span class="line">	<span class="comment">// 然后在Hash圆环上找到对应的节点</span></span><br><span class="line">	i := sort.Search(<span class="built_in">len</span>(c.circle), <span class="function"><span class="keyword">func</span><span class="params">(i <span class="keyword">int</span>)</span> <span class="title">bool</span></span> &#123; <span class="keyword">return</span> c.circle[i] &gt;= key &#125;)</span><br><span class="line">	</span><br><span class="line">  <span class="comment">// 顺时针计算应该就是第一个节点了</span></span><br><span class="line">  <span class="keyword">if</span> i &gt;= c.circle.Len() &#123;</span><br><span class="line">		i = <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> c.servers[c.circle[i]]</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>具体的实现代码已经上传到 <a href="https://github.com/junhaideng/consistent">GitHub</a> 上了</p>
+<h4 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h4><p>一致性哈希在加入和删除节点的时候只会影响相邻的节点，对其他的节点无影响。当节点数量发生变化，我们不希望映射关系全部被打乱的时候，可以采用该算法。</p>
+]]></content>
+      <categories>
+        <category>algorithm</category>
+      </categories>
+      <tags>
+        <tag>distribution</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>负载均衡</title>
+    <url>/2021/11/10/alg/load-balance/</url>
+    <content><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>在实际生产过程中，我们往往会通过集群的方式部署服务器，而不是单机部署，从而可以提高服务的并发能力。</p>
+<p>但是这样部署产生了一个新的问题：如何决定某个请求发往的服务器？这就是负载均衡算法所需要解决的问题。</p>
+<span id="more"></span>
+
+<img src="1.svg" width=400>
+
+
+<h3 id="算法"><a href="#算法" class="headerlink" title="算法"></a>算法</h3><p>目前比较常见的负载均衡算法有：</p>
+<ul>
+<li>轮询法 (Round Robin)</li>
+<li>随机法 (Random)</li>
+<li>权重轮询</li>
+<li>权重随机</li>
+<li>哈希法</li>
+<li>最小响应时间</li>
+<li>最小连接</li>
+</ul>
+<p>下面一一进行介绍</p>
+<blockquote>
+<p>注意：为了简单，下面的代码未考虑并发，仅提供算法思路</p>
+</blockquote>
+<h4 id="轮询法"><a href="#轮询法" class="headerlink" title="轮询法"></a>轮询法</h4><p>轮询法属于最简单的负载均衡策略之一，它的意思是说，这一次请求选择的是 A 服务器，那么下一次请求我们就选择 A 后面的服务器，依次类推，到达最后一个位置之后，重新选择第一个服务器。</p>
+<img src="2.svg" width=200>
+
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">RoundRobin</span><span class="params">(servers []<span class="keyword">string</span>)</span> <span class="title">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">  	<span class="comment">// 保存访问位置</span></span><br><span class="line">	pos := <span class="number">0</span></span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">		res := servers[pos]</span><br><span class="line">    	<span class="comment">// 移动一个位置，下一次选择这个</span></span><br><span class="line">		pos++</span><br><span class="line">        <span class="comment">// 如果达到最后一个</span></span><br><span class="line">        <span class="keyword">if</span> pos == <span class="built_in">len</span>(servers)&#123;</span><br><span class="line">          pos = <span class="number">0</span> </span><br><span class="line">        &#125;</span><br><span class="line">		<span class="keyword">return</span> res</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="随机法"><a href="#随机法" class="headerlink" title="随机法"></a>随机法</h4><p>通过生成随机数，从而选择对应的服务器，算法十分简单</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">init</span><span class="params">()</span></span>&#123;</span><br><span class="line">	<span class="comment">// 随机数种子初始化</span></span><br><span class="line">	rand.Seed(time.Now().UnixNano())</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">Random</span><span class="params">(servers []<span class="keyword">string</span>)</span> <span class="title">string</span></span>&#123;</span><br><span class="line">	index := rand.Intn(<span class="built_in">len</span>(servers))</span><br><span class="line">	<span class="keyword">return</span> servers[index]</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h4 id="权重轮询"><a href="#权重轮询" class="headerlink" title="权重轮询"></a>权重轮询</h4><p>在部署服务的时候，有些服务器可能性能好一点，有些服务器呢，性能差一点，这样的话，如果所有服务器平摊全部请求，肯定不好，那么我们可以给每一个服务器设置一个权重，权重越大，表示性能越好，可以接受更多的服务。比如说现在有两台服务器，A 服务器权重为 <code>3</code>，B 服务器权重为 <code>1</code>，那么平均下来，A 服务器应该接受 <code>3/4</code> 的请求，而B服务器接受 <code>1/4</code> 的请求。</p>
+<p>一种很简单的思路就是将所有的服务器按照权重平铺延展，类似下图，然后使用轮询的方式</p>
+<img src="3.svg" width=200>
+
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> Server <span class="keyword">struct</span> &#123;</span><br><span class="line">	ip     <span class="keyword">string</span></span><br><span class="line">	weight <span class="keyword">int</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WeigthRoundRobin</span><span class="params">(servers []Server)</span> <span class="title">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	pos := <span class="number">0</span></span><br><span class="line">	s := <span class="built_in">make</span>([]<span class="keyword">string</span>, <span class="number">0</span>, <span class="built_in">len</span>(servers))</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="built_in">len</span>(servers); i++ &#123;</span><br><span class="line">		<span class="keyword">for</span> j := <span class="number">0</span>; j &lt; servers[i].weight; j++ &#123;</span><br><span class="line">			s = <span class="built_in">append</span>(s, servers[i].ip)</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">		res := s[pos]</span><br><span class="line">		pos++</span><br><span class="line">		<span class="keyword">if</span> pos == <span class="built_in">len</span>(s) &#123;</span><br><span class="line">			pos = <span class="number">0</span></span><br><span class="line">		&#125;</span><br><span class="line">		<span class="keyword">return</span> res</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>但是这种算法有所缺陷，那就是不平滑，在一个时间段中可能只有 A 服务器在用，但是 B 服务器可能都没有接收到任何请求，针对这种情况，出现了一种比较平滑的算法，<code>nginx</code> 中的权重轮询就是该类。该算法的思想是：</p>
+<ul>
+<li>服务器的初始权重(<code>current</code>)为0，有效权重(<code>effective</code>)为设置的权重值，计算所有的权重和为 <code>total</code></li>
+<li>每一轮选择中，将当前的权重+有效权重，current 最大的为本次选中的服务器</li>
+<li>选中该服务器之后，<code>current</code> 需要减去 <code>total</code></li>
+<li>进行下一轮</li>
+</ul>
+<p>下面是权重为 <code>3</code> 的服务器 A 和权重为 <code>1</code> 的服务器 B 执行该算法的一整轮过程</p>
+<table>
+<thead>
+<tr>
+<th align="center">请求次数</th>
+<th align="center">current</th>
+<th align="center">添加 effective 后</th>
+<th align="center">total</th>
+<th align="center">选中</th>
+<th align="center">选中后 current</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="center">1</td>
+<td align="center">[0, 0]</td>
+<td align="center">[3, 1]</td>
+<td align="center">4</td>
+<td align="center">A</td>
+<td align="center">[-1, 1]</td>
+</tr>
+<tr>
+<td align="center">2</td>
+<td align="center">[-1, 1]</td>
+<td align="center">[2, 2]</td>
+<td align="center">4</td>
+<td align="center">A</td>
+<td align="center">[-2, 2]</td>
+</tr>
+<tr>
+<td align="center">3</td>
+<td align="center">[-2, 2]</td>
+<td align="center">[1, 3]</td>
+<td align="center">4</td>
+<td align="center">B</td>
+<td align="center">[1, -1]</td>
+</tr>
+<tr>
+<td align="center">4</td>
+<td align="center">[1, -1]</td>
+<td align="center">[4, 0]</td>
+<td align="center">4</td>
+<td align="center">A</td>
+<td align="center">[0, 0]</td>
+</tr>
+</tbody></table>
+<p>代码实现如下：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">SmoothWeightRoundRobin</span><span class="params">(servers []Server)</span> <span class="title">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	current := <span class="built_in">make</span>([]<span class="keyword">int</span>, <span class="built_in">len</span>(servers))</span><br><span class="line">	total := <span class="number">0</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="built_in">len</span>(servers); i++ &#123;</span><br><span class="line">		total += servers[i].weight</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">		max := <span class="number">0</span></span><br><span class="line">		index := <span class="number">0</span></span><br><span class="line">		<span class="comment">// 加入 effective 权重</span></span><br><span class="line">		<span class="comment">// 并且找到 current 权重最大的</span></span><br><span class="line">		<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="built_in">len</span>(servers); i++ &#123;</span><br><span class="line">			current[i] += servers[i].weight</span><br><span class="line">			<span class="keyword">if</span> current[i] &gt; max &#123;</span><br><span class="line">				max = current[i]</span><br><span class="line">				index = i</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line"></span><br><span class="line">		current[index] -= total</span><br><span class="line">		<span class="keyword">return</span> servers[index].ip</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="权重随机"><a href="#权重随机" class="headerlink" title="权重随机"></a>权重随机</h4><p>权重随机可以类比权重轮询的第一种实现方式，下面直接给出代码</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WeigthRandom</span><span class="params">(servers []Server)</span> <span class="title">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	rand.Seed(time.Now().UnixNano())</span><br><span class="line">	</span><br><span class="line">	s := <span class="built_in">make</span>([]<span class="keyword">string</span>, <span class="number">0</span>, <span class="built_in">len</span>(servers))</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="built_in">len</span>(servers); i++ &#123;</span><br><span class="line">		<span class="keyword">for</span> j := <span class="number">0</span>; j &lt; servers[i].weight; j++ &#123;</span><br><span class="line">			s = <span class="built_in">append</span>(s, servers[i].ip)</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">		index := rand.Intn(<span class="built_in">len</span>(s))</span><br><span class="line">		<span class="keyword">return</span> s[index]</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>除此之外还可以使用前缀和的思路，将所有的权重构成一个前缀和数组，比如说权重为<code>[1, 2,3]</code> 的时候，可以形成 <code>[0, 1, 3, 6]</code>，轮询的时候随机生成一个索引(<code>[0,6)</code>之间)，然后到数组中查找对应的范围，比如随机出 5，首先 <code>+1</code>，属于 <code>(3, 6]</code>，所以应该返回最后一个节点，也就是说返回大于等于 <code>随机数+1</code> 的前缀和数组值对应的节点，具体的算法实现见 <code>GitHub</code>[^1]</p>
+<h4 id="哈希法"><a href="#哈希法" class="headerlink" title="哈希法"></a>哈希法</h4><p>我们可以对请求中的某个特定属性计算哈希值，然后根据哈希值寻找对应的服务器节点。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">HashLoadBalance</span><span class="params">(servers []<span class="keyword">string</span>)</span> <span class="title">func</span><span class="params">(key <span class="keyword">string</span>)</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">(key <span class="keyword">string</span>)</span> <span class="title">string</span></span> &#123;</span><br><span class="line">		f := fnv.New32()</span><br><span class="line">		f.Write([]<span class="keyword">byte</span>(key))</span><br><span class="line">		<span class="comment">// 计算 hash 值</span></span><br><span class="line">		h := f.Sum32()</span><br><span class="line">		<span class="comment">// 取模获取对应的服务器</span></span><br><span class="line">		<span class="keyword">return</span> servers[<span class="keyword">int</span>(h)%<span class="built_in">len</span>(servers)]</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<blockquote>
+<p>也可以使用一致性哈希算法</p>
+</blockquote>
+<h4 id="最小响应时间"><a href="#最小响应时间" class="headerlink" title="最小响应时间"></a>最小响应时间</h4><p>负载均衡器需要统计服务端响应的时间，然后选择平均响应时间最小的服务器。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 响应时间统计</span></span><br><span class="line"><span class="keyword">type</span> RT <span class="keyword">struct</span> &#123;</span><br><span class="line">  count <span class="keyword">int</span>           <span class="comment">// 多少次</span></span><br><span class="line">	total time.Duration <span class="comment">// 总时间</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">type</span> LoadBalancer <span class="keyword">struct</span> &#123;</span><br><span class="line">  servers []<span class="keyword">string</span></span><br><span class="line">	rt      <span class="keyword">map</span>[<span class="keyword">string</span>]RT <span class="comment">// 响应时间</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(l *LoadBalancer)</span> <span class="title">LeastResponseTime</span><span class="params">()</span> <span class="title">string</span></span> &#123;</span><br><span class="line">  <span class="keyword">if</span> <span class="built_in">len</span>(l.servers) == <span class="number">0</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="string">&quot;&quot;</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 初始化</span></span><br><span class="line">	server := l.servers[<span class="number">0</span>]</span><br><span class="line">	min := l.rt[server].total / time.Duration(l.rt[server].count)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 选择最小的</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">1</span>; i &lt; <span class="built_in">len</span>(l.servers); i++ &#123;</span><br><span class="line">    rt := l.rt[l.servers[i]]</span><br><span class="line">		average := rt.total / time.Duration(rt.count)</span><br><span class="line">		<span class="keyword">if</span> average &lt; min &#123;</span><br><span class="line">      min = average</span><br><span class="line">			server = l.servers[i]</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> server</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="最小连接数"><a href="#最小连接数" class="headerlink" title="最小连接数"></a>最小连接数</h4><p>和最小响应时间类似，需要负载均衡器维护每一个服务器的连接，然后选择连接数量最少的服务器。</p>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>负载均衡算法是集群部署时常用的算法，合理的负载均衡算法能够更好程度的利用我们的服务器资源，提高系统的承受能力，具体的算法需要根据我们的需求进行选择，比如提供 <code>WebSocket</code> 服务的时候，应该使用 <code>哈希法</code>，根据客户端的 <code>IP</code> 地址计算访问的服务端，从而保证先后访问的服务端都是同一个服务端。</p>
+<p>实现代码参见 <a href="https://github.com/junhaideng/LoadBalance">GitHub</a></p>
+]]></content>
+      <categories>
+        <category>algorithm</category>
+      </categories>
+      <tags>
+        <tag>distribution</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>限流算法</title>
+    <url>/2021/11/14/alg/rate-limiter/</url>
+    <content><![CDATA[<p>常见的限流算法主要有两种：令牌桶和漏桶算法，也可以使用计数器进行粗暴限流实现。</p>
+<h3 id="算法原理"><a href="#算法原理" class="headerlink" title="算法原理"></a>算法原理</h3><h4 id="计数器"><a href="#计数器" class="headerlink" title="计数器"></a>计数器</h4><p>维护一个请求数量，在一段时间里，如果请求总数超过了limit，那么我们可以把这个请求拒绝掉，也可以将其放入到缓冲队列中，等待下一个时间段再进行操作。</p>
+<span id="more"></span>
+
+<img src="cnt.svg">
+
+<p>例如在上图中，如果时间1~2中出现了110个请求，那么后面的10个请求就会被拒绝掉，如果这一个时间段中的请求数量在100之内，那么每一个请求都会进行响应。</p>
+<h4 id="漏桶算法"><a href="#漏桶算法" class="headerlink" title="漏桶算法"></a>漏桶算法</h4><p>计数器算法中容易出现毛刺，比如说在60s中我们允许100个请求，但是前1s的时候我们就接收到了100个请求，那么后面的59s我们不会对任何的请求进行响应。</p>
+<p>在漏桶算法中我们将请求依次添加到桶中间，添加的时候如果桶子已经满了，那么我们将这些请求给丢掉或者缓存，另一端以一定速率对请求进行消费。</p>
+<img src="bucket.svg">
+
+<p>一般来说，漏桶是一个FIFO的队列，我们消耗的往往都是最先发起的那一个请求。</p>
+<p>漏桶算法可以使得输出变得平滑，因为算法中请求以固定速率进行消费，也正因为如此，所以漏桶算法不支持突发的请求。</p>
+<h4 id="令牌桶算法"><a href="#令牌桶算法" class="headerlink" title="令牌桶算法"></a>令牌桶算法</h4><p>令牌桶算法是漏桶算法的一种改进，我们设置一个令牌漏斗，桶中初始化一定数量的令牌了，然后按照一定的速率往漏斗中添加令牌，每一个请求到来的时候都会往漏桶中获取需要数量的令牌，如果令牌不够，那么拒绝该请求或者缓存。</p>
+<img src="token_bucket.svg">
+
+<p>相较漏桶算法而言，令牌桶算法允许一定程度的突发。</p>
+<h3 id="算法实现"><a href="#算法实现" class="headerlink" title="算法实现"></a>算法实现</h3><p>限流算法需要实现的基本功能就是判断是否能够放行该请求，如果不行的话，给一个需要的等待的时长，决定是否等待该时长，或者丢弃该请求。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> RateLimiter <span class="keyword">interface</span> &#123;</span><br><span class="line">	<span class="comment">// 返回的值表示需要等待的时间</span></span><br><span class="line">	<span class="comment">// 达到这个时间之后才可能获取到</span></span><br><span class="line">	Take(num <span class="keyword">int</span>) time.Duration</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>下面代码仅为展现实现思路，并未考虑并发问题</p>
+<h4 id="计数器算法"><a href="#计数器算法" class="headerlink" title="计数器算法"></a>计数器算法</h4><p>维护一个计数器 <code>count</code>，一段时间后清零。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 计数器</span></span><br><span class="line"><span class="keyword">type</span> counter <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 当前请求数</span></span><br><span class="line">	count    <span class="keyword">int</span></span><br><span class="line">	lastTime time.Time</span><br><span class="line">	<span class="comment">// 表示1s中限制允许通过的数量</span></span><br><span class="line">	limit <span class="keyword">int</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *counter)</span> <span class="title">Take</span><span class="params">(num <span class="keyword">int</span>)</span> <span class="title">time</span>.<span class="title">Duration</span></span> &#123;</span><br><span class="line">	<span class="comment">// 每隔 1s 清理一次</span></span><br><span class="line">	now := time.Now()</span><br><span class="line">	<span class="keyword">if</span> now.Sub(c.lastTime) &gt; time.Second &#123;</span><br><span class="line">		c.count = <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	c.lastTime = now</span><br><span class="line">	<span class="comment">// 如果该段时间中还允许 num量级 的请求</span></span><br><span class="line">	<span class="keyword">if</span> c.count+num &lt;= c.limit &#123;</span><br><span class="line">		c.count += num</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 可能需要等待的时间</span></span><br><span class="line">	<span class="keyword">return</span> time.Duration(c.count+num-c.limit) * time.Second</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h4 id="漏桶算法-1"><a href="#漏桶算法-1" class="headerlink" title="漏桶算法"></a>漏桶算法</h4><p>漏桶算法保证请求匀速进行消费，我们需要维护漏桶的容量，已经放入的请求数量，上一次进行消耗请求的时间。<br>当有一个请求到来的时候，首先根据当前的时间和上一次消耗请求的时间，计算这段时间里已经消费了多少的请求，然后添加该请求进去，如果没有超过最大容量，那么允许该请求，如果超过了容量，那么被放弃或者等待。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> bucket <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 桶的容量</span></span><br><span class="line">	capacity <span class="keyword">int64</span></span><br><span class="line">	lastTime time.Time</span><br><span class="line">	<span class="comment">// 桶中请求的数量</span></span><br><span class="line">	count <span class="keyword">int64</span></span><br><span class="line">	<span class="comment">// 限制数，最终规整化为 1 duration 中多少个</span></span><br><span class="line">	limit <span class="keyword">int64</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(b *bucket)</span> <span class="title">Take</span><span class="params">(num <span class="keyword">int64</span>)</span> <span class="title">time</span>.<span class="title">Duration</span></span> &#123;</span><br><span class="line">	<span class="comment">// 首先计算当前的时间差</span></span><br><span class="line">	diff := time.Now().Sub(b.lastTime)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 可以消费的数量</span></span><br><span class="line">	count := b.limit * <span class="keyword">int64</span>(diff)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 消耗之后还有多少请求在桶中</span></span><br><span class="line">	b.count -= count</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 如果桶中还可以放入这么多的</span></span><br><span class="line">	<span class="keyword">if</span> b.count+num &lt; b.capacity &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 一次性获取 num 失败，需要再等待多少时间重试</span></span><br><span class="line">	<span class="keyword">return</span> time.Duration((b.count + num - b.capacity) / b.limit)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h4 id="令牌桶算法-1"><a href="#令牌桶算法-1" class="headerlink" title="令牌桶算法"></a>令牌桶算法</h4><p>漏桶算法和令牌桶算法实现的时候比较相似，但是漏桶算法每一轮结算的时候计算消费的请求，减少容器里面的请求数量，而令牌桶算法每轮结算的时候计算产生的令牌数，然后添加到容器中。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> token <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 令牌桶容量</span></span><br><span class="line">	capacity <span class="keyword">int64</span></span><br><span class="line">	lastTime time.Time</span><br><span class="line">	<span class="comment">// 令牌桶中的令牌数量</span></span><br><span class="line">	count <span class="keyword">int64</span></span><br><span class="line">	<span class="comment">// 每个 duration 允许通过的数量</span></span><br><span class="line">	limit <span class="keyword">int64</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(t *token)</span> <span class="title">Take</span><span class="params">(num <span class="keyword">int64</span>)</span> <span class="title">time</span>.<span class="title">Duration</span></span> &#123;</span><br><span class="line">	diff := time.Now().Sub(t.lastTime)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 时间差中可以生成多少的令牌</span></span><br><span class="line">	count := t.limit * <span class="keyword">int64</span>(diff)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 加入令牌</span></span><br><span class="line">	t.count += count</span><br><span class="line">	<span class="comment">// 满了的令牌抛弃</span></span><br><span class="line">	<span class="keyword">if</span> t.count &gt; t.capacity &#123;</span><br><span class="line">		t.count = t.capacity</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 需要的令牌少于桶中的令牌</span></span><br><span class="line">	<span class="keyword">if</span> num &lt;= t.count &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 需要等待多少时间</span></span><br><span class="line">	<span class="keyword">return</span> time.Duration((num - t.count) / t.limit)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h4><p>当系统的 <code>QPS</code> 太高扛不住了，我们可以使用限流算法限制住一部分的流量，比如对于 HTTP 请求可以返回 <code>429</code> 给用户，同时如果说我们只想要用户在一个时间段里面最多请求 n 次，也可以使用限流算法。</p>
+<p>在工程运用中，实现限流算法的时候通常会采用无锁操作，这样可以带来更高的效率。</p>
+<h3 id="完整代码"><a href="#完整代码" class="headerlink" title="完整代码"></a>完整代码</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;fmt&quot;</span></span><br><span class="line">	<span class="string">&quot;time&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="comment">// 本代码仅为思路讲解，并未考虑并发问题</span></span><br><span class="line"><span class="comment">// 工程运用中一般会考虑无锁操作</span></span><br><span class="line"><span class="comment">// 有兴趣的同学可以参考 https://github.com/uber-go/ratelimit</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">type</span> RateLimiter <span class="keyword">interface</span> &#123;</span><br><span class="line">	<span class="comment">// 返回的值表示需要等待的时间</span></span><br><span class="line">	<span class="comment">// 达到这个时间之后才能获取到</span></span><br><span class="line">	Take(num <span class="keyword">int</span>) time.Duration</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 计数器</span></span><br><span class="line"><span class="keyword">type</span> counter <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 当前请求数</span></span><br><span class="line">	count    <span class="keyword">int</span></span><br><span class="line">	lastTime time.Time</span><br><span class="line">	<span class="comment">// 表示1s中限制允许通过的数量</span></span><br><span class="line">	limit <span class="keyword">int</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *counter)</span> <span class="title">Take</span><span class="params">(num <span class="keyword">int</span>)</span> <span class="title">time</span>.<span class="title">Duration</span></span> &#123;</span><br><span class="line">	<span class="comment">// 每隔 1s 清理一次</span></span><br><span class="line">	now := time.Now()</span><br><span class="line">	<span class="keyword">if</span> now.Sub(c.lastTime) &gt; time.Second &#123;</span><br><span class="line">		c.count = <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	c.lastTime = now</span><br><span class="line">	<span class="comment">// 如果该段时间中还允许 num量级 的请求</span></span><br><span class="line">	<span class="keyword">if</span> c.count+num &lt;= c.limit &#123;</span><br><span class="line">		c.count += num</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 可能需要等待的时间</span></span><br><span class="line">	<span class="comment">// 为什么可能？因为需要考虑并发</span></span><br><span class="line">	<span class="keyword">return</span> time.Duration(c.count+num-c.limit) * time.Second</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"></span><br><span class="line"><span class="comment">// 漏桶算法</span></span><br><span class="line"><span class="keyword">type</span> bucket <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 桶的容量</span></span><br><span class="line">	capacity <span class="keyword">int64</span></span><br><span class="line">	lastTime time.Time</span><br><span class="line">	<span class="comment">// 桶中请求的数量</span></span><br><span class="line">	count <span class="keyword">int64</span></span><br><span class="line">	<span class="comment">// 限制数，最终规整化为 1 duration 中多少个</span></span><br><span class="line">	limit <span class="keyword">int64</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(b *bucket)</span> <span class="title">Take</span><span class="params">(num <span class="keyword">int64</span>)</span> <span class="title">time</span>.<span class="title">Duration</span></span> &#123;</span><br><span class="line">	<span class="comment">// 首先计算当前的时间差</span></span><br><span class="line">	diff := time.Now().Sub(b.lastTime)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 可以消费的数量</span></span><br><span class="line">	count := b.limit * <span class="keyword">int64</span>(diff)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 消耗之后还有多少请求在桶中</span></span><br><span class="line">	b.count -= count</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 如果桶中还可以放入这么多的</span></span><br><span class="line">	<span class="keyword">if</span> b.count+num &lt; b.capacity &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 一次性获取 num 失败，需要再等待多少时间重试</span></span><br><span class="line">	<span class="keyword">return</span> time.Duration((b.count + num - b.capacity) / b.limit)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 令牌桶算法</span></span><br><span class="line"><span class="keyword">type</span> token <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 令牌桶容量</span></span><br><span class="line">	capacity <span class="keyword">int64</span></span><br><span class="line">	lastTime time.Time</span><br><span class="line">	<span class="comment">// 令牌桶中的令牌数量</span></span><br><span class="line">	count <span class="keyword">int64</span></span><br><span class="line">	<span class="comment">// 每个 duration 允许通过的数量</span></span><br><span class="line">	limit <span class="keyword">int64</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(t *token)</span> <span class="title">Take</span><span class="params">(num <span class="keyword">int64</span>)</span> <span class="title">time</span>.<span class="title">Duration</span></span> &#123;</span><br><span class="line">	diff := time.Now().Sub(t.lastTime)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 时间差中可以生成多少的令牌</span></span><br><span class="line">	count := t.limit * <span class="keyword">int64</span>(diff)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 加入令牌</span></span><br><span class="line">	t.count += count</span><br><span class="line">	<span class="comment">// 满了的令牌抛弃</span></span><br><span class="line">	<span class="keyword">if</span> t.count &gt; t.capacity &#123;</span><br><span class="line">		t.count = t.capacity</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 需要的令牌少于桶中的令牌</span></span><br><span class="line">	<span class="keyword">if</span> num &lt;= t.count &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 需要等待多少时间</span></span><br><span class="line">	<span class="keyword">return</span> time.Duration((num - t.count) / t.limit)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">testCounter</span><span class="params">()</span></span> &#123;</span><br><span class="line">	rt := &amp;counter&#123;</span><br><span class="line">		<span class="number">0</span>, time.Now(), <span class="number">1</span>,</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 有一个请求会被block</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="number">10</span>; i++ &#123;</span><br><span class="line">		fmt.Println(rt.Take(<span class="number">1</span>))</span><br><span class="line">		fmt.Println(rt.Take(<span class="number">1</span>))</span><br><span class="line">		time.Sleep(time.Second)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	rt.limit = <span class="number">2</span></span><br><span class="line">	<span class="comment">// 都可以通过</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="number">10</span>; i++ &#123;</span><br><span class="line">		fmt.Println(rt.Take(<span class="number">1</span>))</span><br><span class="line">		fmt.Println(rt.Take(<span class="number">1</span>))</span><br><span class="line">		time.Sleep(time.Second)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">testBucket</span><span class="params">()</span></span> &#123;</span><br><span class="line">	rt := &amp;bucket&#123;</span><br><span class="line">		<span class="number">1</span>, time.Now(), <span class="number">0</span>, <span class="number">1</span>,</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="number">10</span>; i++ &#123;</span><br><span class="line">		fmt.Println(rt.Take(time.Second.Nanoseconds()))</span><br><span class="line">		fmt.Println(rt.Take(<span class="number">100</span>))</span><br><span class="line">		<span class="comment">// time.Sleep(time.Second)</span></span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">testToken</span><span class="params">()</span></span> &#123;</span><br><span class="line">	rt := &amp;token&#123;</span><br><span class="line">		<span class="number">10</span>, time.Now(), <span class="number">0</span>, <span class="number">1</span>,</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; <span class="number">10</span>; i++ &#123;</span><br><span class="line">		fmt.Println(rt.Take(time.Second.Nanoseconds()))</span><br><span class="line">		fmt.Println(rt.Take(<span class="number">1</span>))</span><br><span class="line">		<span class="comment">// time.Sleep(time.Second)</span></span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	testCounter()</span><br><span class="line">	<span class="comment">// testBucket()</span></span><br><span class="line">	<span class="comment">// testToken()</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+]]></content>
+      <categories>
+        <category>algorithm</category>
+      </categories>
+      <tags>
+        <tag>distribution</tag>
+        <tag>api</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>如何搭建个人博客？</title>
+    <url>/2021/12/21/blog/deploy/</url>
+    <content><![CDATA[<h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>每一个技术同学都希望能够拥有一份自己的博客，有时候在上面写写东西，不需要太多，不需要炫彩夺目，简简单单就好，如果自己的文章能够帮助到他人那就更加欢喜不得了。</p>
+<p>第一次看到 CSDN 上的写的<a href="https://blog.csdn.net/weixin_44676081/article/details/103145416">一篇文章</a>如此受大家的喜欢，甚是喜悦，后来又陆陆续续写了很多文章，不论是写代码时遇到的 bug 解决思路，还是刚学习某门语言时碰到的问题，亦或是学的某些算法等等。</p>
+<p>收到 GitHub 上许多同学的点赞之后，也越来越喜欢开源自己写的 <code>Project</code>，同时 GitHub 上有着许许多多的有些仓库值得我们去学习。</p>
+<p>在 <code>CSDN</code> 和 <code>掘金</code> 上写了这么些文章，但总是觉点欠缺点什么，前不久看到其他同学的博客，于是想着搭建自己的一份博客，一来可以方便内容的聚集，二来也算是满足自己的一个小小的愿望，谁不想要有自己的博客呢😄</p>
+<span id="more"></span>
+
+<h1 id="选材"><a href="#选材" class="headerlink" title="选材"></a>选材</h1><p>网上其实有很多的博客模板，我们也没有必要从零开始搭建一个博客，当然，如果有时间有能力的话，也未尝不可是一次很好的尝试呢，因为在尝试的过程中，你可能会遇到很多问题，而这些问题恰恰就是你学习的机会。</p>
+<p>在这里，我选择的是 <a href="https://hexo.io/">Hexo</a> 博客模板再加上 <a href="https://ppoffice.github.io/hexo-theme-icarus/">Icarus</a> 主题，选择 Hexo 博客模板是因为其支持 <code>Markdown</code> 编写文章，并且生态很好，对于主题的挑选随自己的心愿，可以到<a href="https://hexo.io/themes/">主题</a>模块去探索符合自己口味的。</p>
+<p>刚开始选择的主题是 <a href="https://theme-next.js.org/">NexT</a>，长下面这样，其实还可以，自定义之后也可以做的很好看。</p>
+<img src="next.png">
+
+<p>后来看到了 Icarus 主题，经过配置之后达到下面的效果，这才是我想要的主题嘛，简洁大方，界面UI也做的很不错。</p>
+<img src="icarus.png">
+
+<h1 id="步骤"><a href="#步骤" class="headerlink" title="步骤"></a>步骤</h1><p>下面假设已经预先安装好了 <a href="https://nodejs.org/en/">Node.js</a> 和 <a href="https://git-scm.com/">Git</a>，若尚未安装好，可以进入相应的官网进行下载安装，过程比较简单，这里不再赘述。</p>
+<h2 id="安装脚手架"><a href="#安装脚手架" class="headerlink" title="安装脚手架"></a>安装脚手架</h2><p><code>Hexo</code> 提供了脚手架，我们可以方便的创建博客，首先进行安装：</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ npm install -g hexo-cli</span><br></pre></td></tr></table></figure>
+
+<p>安装完成之后，如果执行 <code>hexo -v</code> 可以返回对应的版本号，则安装成功。</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">$ hexo -v</span><br><span class="line">hexo-cli: 4.3.0</span><br><span class="line">os: win32 10.0.22000</span><br><span class="line">node: 14.17.4</span><br><span class="line">v8: 8.4.371.23-node.76</span><br><span class="line">uv: 1.41.0</span><br><span class="line">zlib: 1.2.11</span><br><span class="line">brotli: 1.0.9</span><br><span class="line">ares: 1.17.1</span><br><span class="line">modules: 83</span><br><span class="line">nghttp2: 1.42.0</span><br><span class="line">napi: 8</span><br><span class="line">llhttp: 2.1.3</span><br><span class="line">openssl: 1.1.1k</span><br><span class="line">cldr: 39.0</span><br><span class="line">icu: 69.1</span><br><span class="line">tz: 2021a</span><br><span class="line">unicode: 13.0</span><br></pre></td></tr></table></figure>
+
+<h2 id="创建博客"><a href="#创建博客" class="headerlink" title="创建博客"></a>创建博客</h2><p>首先执行 <code>hexo init [name]</code> 初始化博客。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$  hexo init blog</span><br><span class="line">INFO  Cloning hexo-starter https://github.com/hexojs/hexo-starter.git</span><br><span class="line">INFO  Install dependencies</span><br><span class="line">...</span><br><span class="line">INFO  Start blogging with Hexo!</span><br></pre></td></tr></table></figure>
+
+<p>博客项目初始化完成之后，我们就已经搭建了一个很简单的博客网站了，运行 <code>hexo server</code> 或者 <code>hexo s</code> 命令，运行博客：</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo s</span><br><span class="line">INFO  Validating config</span><br><span class="line">INFO  Start processing</span><br><span class="line">INFO  Hexo is running at http://localhost:4000 . Press Ctrl+C to stop.</span><br></pre></td></tr></table></figure>
+
+<p>样式如下，依个人看法，十分丑陋😂</p>
+<img src="hexo.png">
+
+
+
+<h2 id="编写文章"><a href="#编写文章" class="headerlink" title="编写文章"></a>编写文章</h2><p>使用 <code>hexo new [title]</code> 即可创建一篇文章，使用 <code>markdown</code> 进行编写即可，创建的文件在 <code>source/_posts/test.md</code>。</p>
+<p>如果需要引入图片的话，注意这里不能直接引入本地图片，可以首先创建一个界面，然后将图片放置在该目录中：</p>
+<ul>
+<li>首先创建 <code>images</code> 界面：<code>hexo new page images</code>，其实相当于多了二级路由 <code>/images</code></li>
+<li>将需要添加的图片放在 images 目录下，可以在其中再创建目录</li>
+<li>使用绝对路径引用图片：比如 <code>img</code> 标签的 <code>src</code> 应为 <code>/images/test.png</code>，<code>i/mages/blog/test.png</code></li>
+</ul>
+<p>当然如果说想要直接引用本地文件，可以参考 <a href="https://hexo.io/zh-cn/docs/asset-folders">asset-folders</a>，首先将配置文件 <code>_config.yml</code> 中的 <code>post_asset_folder</code> 设置为 <code>true</code>，创建新文章时自动创建一个文件夹，这个资源文件夹将会有与这个文章文件一样的名字，需要的资源放在该目录中，即可通过相对路径访问了。举个栗子，文章 <code>test.md</code> 对应的<code>test</code> 目录下放了一个 <code>go.png</code>，那么在 <code>test.md</code> 中可以使用 <code>&lt;img src=&quot;go.png&quot;&gt;</code> 进行引用。</p>
+<h2 id="美化"><a href="#美化" class="headerlink" title="美化"></a>美化</h2><p>美化，当然要看主题了，<code>Hexo</code> 主要提供的是一个框架，我们可以任意选择主题，当然也可以自制主题，只不过成本比较高，下面以 <code>Icarus</code> 主题为例，演示如何设置主题。</p>
+<p>首先下载对应的主题文件，这里推荐使用 <code>git clone</code>。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">git <span class="built_in">clone</span> https://github.com/ppoffice/hexo-theme-icarus.git themes/icarus </span><br></pre></td></tr></table></figure>
+
+<p>然后在 <code>_config.yml</code> 中配置主题为 <code>icarus</code>，或者使用命令 <code>hexo config theme icarus</code> 进行设置，然后重启即可，效果如下：</p>
+<img src="icarus-theme.png">
+
+<p>过程中可能有些模块没有安装，使用 <code>npm install</code> 或者 <code>yarn add</code> 添加即可。</p>
+<h2 id="部署"><a href="#部署" class="headerlink" title="部署"></a>部署</h2><p>这里使用 <code>GitHub Pages</code> 进行部署，不需要自己购买服务器，当然如果想部署在自己的服务器也是可以的，推荐使用 <code>Nginx</code> 搭建，下面进行演示。</p>
+<p>在 GitHub 创建一个仓库，命名为 <code>&lt;your name&gt;.github.io</code>，比如用户名为<code>xiaoming</code> 的同学应该命名为<code>xiaoming.github.io</code>。</p>
+<p>然后在 <code>_config.yml</code> 中进行配置，这里注意需要把本地的 <code>ssh</code> 公钥添加到 <a href="https://github.com/settings/keys">GitHub</a> 中。</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 配置 url</span></span><br><span class="line"><span class="attr">url:</span> <span class="string">https://junhaideng.github.io/</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 配置部署的仓库</span></span><br><span class="line"><span class="attr">deploy:</span></span><br><span class="line">  <span class="attr">type:</span> <span class="string">&#x27;git&#x27;</span></span><br><span class="line">  <span class="attr">repo:</span> <span class="string">&#x27;git@github.com:junhaideng/junhaideng.github.io.git&#x27;</span></span><br><span class="line">  <span class="attr">branch:</span> <span class="string">&#x27;main&#x27;</span></span><br></pre></td></tr></table></figure>
+
+<p>执行 <code>npm run deploy</code>，项目即可部署，其实就是相当于把打包后的文件通过 <code>Git</code> 上传到仓库中。进入代码仓库的 <code>Settings &gt; Pages</code>，可以看到项目已经成功部署。</p>
+<img src="github_pages.png">
+
+<h2 id="其他插件"><a href="#其他插件" class="headerlink" title="其他插件"></a>其他插件</h2><p><code>Icarus</code> 中支持丰富的插件和个性化配置，比如 <strong>百度统计</strong>、<strong>Latex公式</strong>、<strong>布局样式</strong>等等，同时也支持评论，使用 <code>Gitalk</code> 十分简单的就可以搭建一个评论系统，这些就留给读者慢慢探索了，其<a href="https://ppoffice.github.io/hexo-theme-icarus">官方文档</a>中也有详细说明。</p>
+]]></content>
+      <categories>
+        <category>blog</category>
+      </categories>
+      <tags>
+        <tag>blog</tag>
+        <tag>deploy</tag>
+        <tag>GitHub</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Snowflake ID 算法</title>
+    <url>/2021/11/24/alg/snowflake/</url>
+    <content><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>假设我们有一个分布式系统，系统中需要维护全局 <code>id</code> 字段，我们可以把它认为是唯一的标识，不能够重复出现，那么问题来了，我们应该如何生成这样的 <code>id</code> 呢？</p>
+<p>其实很容易想到的一种解决方式就是使用 <code>Redis</code> 的键值对了，每次更新的时候直接调用 <code>incr</code>，生成的 id 也是唯一的，还有一种方式就是使用 <code>MySQL</code> 或者其他的数据库，因为我们知道 <code>MySQL</code> 中可以生成自增主键，使用这个主键作为一个分布式 <code>id</code> 也是可行的。</p>
+<p>但是上面的这两种方式效率不会特别高，并且依赖于第三方，我们如果想要更高效的生成分布式 <code>id</code>，那么最好的方式就是尽量本地生成，不需要和其他节点进行协商，但是有一个问题出现了，<strong>如何保证 id 不重复？</strong>，我们可以使用 <code>Snowflake</code> 算法来解决该问题。</p>
+<span id="more"></span>
+
+<h3 id="概念"><a href="#概念" class="headerlink" title="概念"></a>概念</h3><p><code>Snowflake</code> 可用于在分布式系统中生成唯一的 <code>id</code>，由 <code>Twitter</code> 提出，目前存在很多不同的版本，但是基本的思想是一致的，只不过不同版本不同结构采用的位数不一致。</p>
+<p><code>Snowflakes</code> 使用 <code>64</code> 比特， 但是只有 <code>63</code> 位被使用，第一个比特位为符号位，大体结构如下：</p>
+<img src="images/format.svg">
+
+<p><code>timestamp</code> 占 <code>41</code> bits，是生成 <code>ID</code> 的时间戳，也可以是相对某一个特定时间的时间戳差，<code>machine id </code>为分布式系统每一个机器分配到的 <code>id</code> 号，<code>10 bits</code> 表示最多 <code>1024</code> 台机器，<code>sequence number</code> 表示序列号，因为同一个时间戳可能分配多个 <code>id</code>。</p>
+<h3 id="ID-生成"><a href="#ID-生成" class="headerlink" title="ID 生成"></a>ID 生成</h3><p>每一台机器的 <code>machine id</code> 都是事先配置好的，可以由数据中心 <code>id</code> 和数据中心的机器 <code>id</code> 组成，直接可以获取到。当我们需要生成一个 <code>id</code> 的时候，首先我们需要获取当前的时间戳，判断是否和上一次的时间戳一致，如果说和上一次的时间戳一致，那么我们应该增加序列号，然后通过移位操作构造对应的一个 <code>64 bits</code> 的 <code>id</code> 号返回。 如果说当前的时间戳与上一次的不同，那么我们直接修改时间戳，然后序列号取零，进行拼接即可。</p>
+<img src="images/flow.svg">
+
+<h3 id="代码实现"><a href="#代码实现" class="headerlink" title="代码实现"></a>代码实现</h3><p>算法的实现挺简单的，下面给出核心代码：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(s *Snowflake)</span> <span class="title">GetID</span><span class="params">()</span> <span class="title">int64</span></span> &#123;</span><br><span class="line">	<span class="comment">// 首先获取当前的时间戳</span></span><br><span class="line">	timestamp := time.Now().UnixMilli()</span><br><span class="line">	<span class="comment">// 相同的时间戳序列号+1</span></span><br><span class="line">	<span class="keyword">if</span> timestamp == s.LastTimestamp &#123;</span><br><span class="line">		s.Sequence = (s.Sequence + <span class="number">1</span>) &amp; sequenceMask</span><br><span class="line">		<span class="comment">// 重新绕了一圈</span></span><br><span class="line">		<span class="comment">// 同一个时间戳里面生成了很多 id</span></span><br><span class="line">		<span class="keyword">if</span> s.Sequence == <span class="number">0</span> &#123;</span><br><span class="line">			<span class="keyword">for</span> timestamp &lt;= s.LastTimestamp &#123;</span><br><span class="line">				timestamp = time.Now().UnixMilli()</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">	&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">		s.Sequence = <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 重新设置</span></span><br><span class="line">	s.LastTimestamp = timestamp</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 进行拼接</span></span><br><span class="line">	<span class="keyword">return</span> (timestamp-epoch)&lt;&lt;timestampShift | (s.DatacenterID &lt;&lt; datacenterIDShift) | (s.WorkerID &lt;&lt; workerIDShift) | s.Sequence</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h3 id="测试"><a href="#测试" class="headerlink" title="测试"></a>测试</h3><p>写了一个很简单的基准测试：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">BenchmarkGetID</span><span class="params">(b *testing.B)</span></span> &#123;</span><br><span class="line">	s := New(<span class="number">10</span>, <span class="number">10</span>)</span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; b.N; i++ &#123;</span><br><span class="line">		s.GetID()</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>下面是它的结果，表现还不错吧，这样算起来，假设每次需要 <code>250</code> ns，那么 <code>1s</code> 也可以生成 <code>4,000,000</code> 个不同的 <code>id</code> 。</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">goos: windows</span><br><span class="line">goarch: amd64</span><br><span class="line">pkg: snowflake</span><br><span class="line">cpu: Intel(R) Core(TM) i7-8565U CPU @ 1.80GHz</span><br><span class="line">BenchmarkGetID-8         4897538               246.0 ns/op</span><br><span class="line">PASS</span><br><span class="line">ok      snowflake       2.069s</span><br></pre></td></tr></table></figure>
+
+<p><code>Twitter</code> 其实也提供了自己的 <code>Scala</code> 实现方式，具体的可以参见 <a href="https://github.com/twitter-archive/snowflake/tree/snowflake-2010">GitHub</a>， 本文的实现方式可以参见 <a href="https://github.com/junhaideng/Blog">我的仓库</a>。</p>
+]]></content>
+      <categories>
+        <category>algorithm</category>
+      </categories>
+      <tags>
+        <tag>distribution</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>八大排序算法及其代码实现</title>
+    <url>/2021/11/29/alg/sort/</url>
+    <content><![CDATA[<h2 id="选择排序"><a href="#选择排序" class="headerlink" title="选择排序"></a>选择排序</h2><h3 id="原理"><a href="#原理" class="headerlink" title="原理"></a>原理</h3><p>每次选择数组中的最小元素，排在第一个位置</p>
+<h3 id="算法步骤"><a href="#算法步骤" class="headerlink" title="算法步骤"></a>算法步骤</h3><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">[38,65,97,76,13,27,49]</span><br><span class="line">13 [65 97 76 38 27 49]</span><br><span class="line">13 27 [97 76 38 65 49]</span><br><span class="line">13 27 38 [76 97 65 49]</span><br><span class="line">13 27 38 49 [97 65 76]</span><br><span class="line">13 27 38 49 65 [97 76]</span><br><span class="line">13 27 38 49 65 76 [97]</span><br><span class="line">13 27 38 49 65 76 97</span><br></pre></td></tr></table></figure>
+
+<span id="more"></span>
+
+<h3 id="代码实现"><a href="#代码实现" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">SelectSort</span><span class="params">(data []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	length := <span class="built_in">len</span>(data)</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; length; i++ &#123;</span><br><span class="line">		<span class="comment">// 记录第一个数据</span></span><br><span class="line">		min := data[i]</span><br><span class="line">		index := i</span><br><span class="line"></span><br><span class="line">		<span class="comment">// 获取到最小的值以及对应的索引</span></span><br><span class="line">		<span class="keyword">for</span> j := i + <span class="number">1</span>; j &lt; length; j++ &#123;</span><br><span class="line">			<span class="keyword">if</span> min &gt; data[j] &#123;</span><br><span class="line">				min = data[j]</span><br><span class="line">				index = j</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">// 如果最小的值不是当前序列的第一个值</span></span><br><span class="line">		<span class="comment">// 那么需要进行交换</span></span><br><span class="line">		<span class="keyword">if</span> index != i &#123;</span><br><span class="line">			<span class="comment">// 交换最小值</span></span><br><span class="line">			data[index], data[i] = data[i], min</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="插入排序"><a href="#插入排序" class="headerlink" title="插入排序"></a>插入排序</h2><h3 id="原理-1"><a href="#原理-1" class="headerlink" title="原理"></a>原理</h3><p>假设之前的数组都是一个有序序列，其余的记录为无序序列，从这些无序序列中不断选取数据，插入到前面已经排序好的有序序列中</p>
+<h3 id="算法步骤-1"><a href="#算法步骤-1" class="headerlink" title="算法步骤"></a>算法步骤</h3><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">[38] 65 97 76 13 27 49</span><br><span class="line">[38 65] 97 76 13 27 49</span><br><span class="line">[38 65 97] 76 13 27 49</span><br><span class="line">[38 65 76 97] 13 27 49</span><br><span class="line">[13 38 65 76 97] 27 49</span><br><span class="line">[13 27 38 65 76 97] 49</span><br><span class="line">[13 27 38 49 65 76 97]</span><br></pre></td></tr></table></figure>
+
+
+<h3 id="代码实现-1"><a href="#代码实现-1" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">InsertSort</span><span class="params">(data []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">1</span>; i &lt; <span class="built_in">len</span>(data); i++ &#123;</span><br><span class="line">		tmp, j := data[i], i</span><br><span class="line">		<span class="comment">// 如果第j-1个元素比第i个元素大</span></span><br><span class="line">		<span class="comment">// 不满足递增的条件，第i个需要移动到前面</span></span><br><span class="line">		<span class="keyword">if</span> data[j<span class="number">-1</span>] &gt; tmp &#123;</span><br><span class="line">			<span class="comment">// 将第i个元素移动到前面的适当位置</span></span><br><span class="line">			<span class="comment">// 也就是将元素不断的向右边移动，直到找到合适的位置摆放</span></span><br><span class="line">			<span class="keyword">for</span> j &gt;= <span class="number">1</span> &amp;&amp; data[j<span class="number">-1</span>] &gt; tmp &#123;</span><br><span class="line">				data[j] = data[j<span class="number">-1</span>]</span><br><span class="line">				j--</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">// 将当前遍历到的值填充到对应的位置</span></span><br><span class="line">		data[j] = tmp</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="冒泡排序"><a href="#冒泡排序" class="headerlink" title="冒泡排序"></a>冒泡排序</h2><h3 id="原理-2"><a href="#原理-2" class="headerlink" title="原理"></a>原理</h3><p>基本思路: 从第一个元素开始一次对相邻的记录进行比较， 当前面的记录大于后面的记录，交换其位置，进行一轮比较和换位之后，n个记录中的最大记录将位于第n位</p>
+<h3 id="算法步骤-2"><a href="#算法步骤-2" class="headerlink" title="算法步骤"></a>算法步骤</h3><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">&#123;38 65 97 76 13 27 49&#125;</span><br><span class="line">38 65 76 13 27 49 [97]</span><br><span class="line">38 65 13 27 49 [76 97]</span><br><span class="line">38 13 27 49 [65 76 97]</span><br><span class="line">13 27 38 [49 65 76 97]</span><br><span class="line">13 27 [38 49 65 76 97]</span><br><span class="line">13 [27 38 49 65 76 97]</span><br><span class="line">[13 27 38 49 65 76 97]</span><br></pre></td></tr></table></figure>
+
+<h3 id="代码实现-2"><a href="#代码实现-2" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">BubbleSort</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	flag := <span class="literal">false</span></span><br><span class="line">	n := <span class="built_in">len</span>(nums)</span><br><span class="line">	<span class="comment">// 这里采用的是不断将最大的移动到数组的最后面</span></span><br><span class="line">	<span class="comment">// 当然也可以将最小的移动到最前面来</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; n ; i ++&#123;</span><br><span class="line">		<span class="keyword">for</span> j := <span class="number">0</span>; j &lt; n<span class="number">-1</span> -i; j ++&#123;</span><br><span class="line">			<span class="keyword">if</span> nums[j] &gt; nums[j+<span class="number">1</span>]&#123;</span><br><span class="line">				nums[j], nums[j+<span class="number">1</span>] = nums[j+<span class="number">1</span>], nums[j]</span><br><span class="line">				flag = <span class="literal">true</span></span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="keyword">if</span> !flag&#123;</span><br><span class="line">			fmt.Println(<span class="string">&quot;一轮遍历中没有进行交换，说明数组已经有序&quot;</span>)</span><br><span class="line">			<span class="keyword">break</span></span><br><span class="line">		&#125;</span><br><span class="line">		fmt.Println(nums)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h2 id="归并排序"><a href="#归并排序" class="headerlink" title="归并排序"></a>归并排序</h2><h3 id="原理-3"><a href="#原理-3" class="headerlink" title="原理"></a>原理</h3><p>将一个数组拆成两份，每一份进行递归操作之后都是有序的，然后进行合并，最终是有序的。</p>
+<h3 id="算法步骤-3"><a href="#算法步骤-3" class="headerlink" title="算法步骤"></a>算法步骤</h3><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">&#123;38 65 97 76 13 27 49&#125;</span><br><span class="line">[38 65 97 76] [13 27 49] </span><br><span class="line">[38 65] [97 76] [13 27] [49]</span><br><span class="line">[38] [65] [97] [76] [13] [27] [49]  // 全部分裂</span><br><span class="line">[38 65] [76 97] [13 27] [49] // 开始进行合并</span><br><span class="line">[38 65 76 97] [13 27 49]</span><br><span class="line">[13 27 38 49 65 76 97]</span><br></pre></td></tr></table></figure>
+
+
+<h3 id="代码实现-3"><a href="#代码实现-3" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">MergerSort</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	mergeSort(nums, <span class="number">0</span>, <span class="built_in">len</span>(nums)<span class="number">-1</span>)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">mergeSort</span><span class="params">(nums []<span class="keyword">int</span>, left, right <span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="keyword">if</span> left &gt;= right &#123;</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line">	mid := (right-left)/<span class="number">2</span> + left</span><br><span class="line">	mergeSort(nums, left, mid)</span><br><span class="line">	mergeSort(nums, mid+<span class="number">1</span>, right)</span><br><span class="line">	merge(nums, left, mid, right)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 合并两个数组，分别是从 left -&gt; mid , mid -&gt; right 索引开始</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">merge</span><span class="params">(nums []<span class="keyword">int</span>, left, mid, right <span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="comment">// 辅助数据</span></span><br><span class="line">	tmp := <span class="built_in">make</span>([]<span class="keyword">int</span>, right-left+<span class="number">1</span>)</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i := left; i &lt;= right; i++ &#123;</span><br><span class="line">		tmp[i-left] = nums[i]</span><br><span class="line">	&#125;</span><br><span class="line">	i, j := <span class="number">0</span>, mid-left+<span class="number">1</span></span><br><span class="line">	k := left</span><br><span class="line">	<span class="keyword">for</span> k &lt;= right &amp;&amp; i &lt;= mid-left &amp;&amp; j &lt;= right-left &#123;</span><br><span class="line">		<span class="keyword">if</span> tmp[i] &gt; tmp[j] &#123;</span><br><span class="line">			nums[k] = tmp[j]</span><br><span class="line">			k++</span><br><span class="line">			j++</span><br><span class="line">		&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">			nums[k] = tmp[i]</span><br><span class="line">			i++</span><br><span class="line">			k++</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">for</span> i &lt;= mid-left &#123;</span><br><span class="line">		nums[k] = tmp[i]</span><br><span class="line">		i++</span><br><span class="line">		k++</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> j &lt;= right-left &#123;</span><br><span class="line">		nums[k] = tmp[j]</span><br><span class="line">		j++</span><br><span class="line">		k++</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h2 id="快速排序"><a href="#快速排序" class="headerlink" title="快速排序"></a>快速排序</h2><p>快速排序是一种非常高效的排序算法，它采用分而治之的思想，把大的拆分成小的，小的再拆分成更小的。</p>
+<h3 id="原理-4"><a href="#原理-4" class="headerlink" title="原理"></a>原理</h3><p>对于一组给定的记录，通过一趟排序之后，将原来的序列分成两部分，其中一部分的所有记录均比后一部分的所有记录小，然后再依次对前后两部分的记录进行快速排序，递归改过程，直到序列中的所有记录均有序为止</p>
+<blockquote>
+<p>可以直接认为是找到了一个分界点，比如如果需要实现递增，那么左边都是小于该数，右边都是大于该数</p>
+</blockquote>
+<h3 id="算法步骤-4"><a href="#算法步骤-4" class="headerlink" title="算法步骤"></a>算法步骤</h3><ol>
+<li>分解：将输入的序列<code>array[m...n]</code> 划分成两个非空子序列<code>array[m...k]</code>和<code>array[k+1...n]</code>，使得<code>array[k+1...n]</code>中的任意一个元素都不小于<code>array[m...k]</code>中的元素</li>
+<li>递归求解：通过递归调用快速排序算法分别对<code>array[m...k]</code>和<code>array[k+1...n]</code>进行排序</li>
+<li>合并：由于对分解出来的两个子序列的排序是就地进行的，所以在<code>array[m...k]</code>和<code>array[k+1...n]</code>都排好序后不需要执行任何计算<code>array[m...n]</code></li>
+</ol>
+<h3 id="代码实现-4"><a href="#代码实现-4" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">sort</span><span class="params">(arr []<span class="keyword">int</span>, left, right <span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="keyword">if</span> left &gt;= right &#123;</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	i := left</span><br><span class="line">	j := right</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 选定一个分界点</span></span><br><span class="line">    <span class="comment">// 如果直接下面这种方式取的话，如果数据是有序的，那么时间复杂度相比较会比较高</span></span><br><span class="line">	index := arr[i]</span><br><span class="line">    <span class="comment">// 也可以随机挑选一个</span></span><br><span class="line">    </span><br><span class="line">   	<span class="comment">// rand.Seed(time.Now().UnixNano())</span></span><br><span class="line">	<span class="comment">// var random int </span></span><br><span class="line">	<span class="comment">// random = rand.Int() % (right-left+1) + left</span></span><br><span class="line">    <span class="comment">// 将随机选中的移动到最左边</span></span><br><span class="line">	<span class="comment">// arr[i], arr[random] = arr[random], arr[i]</span></span><br><span class="line">    <span class="comment">// 这里只是为了更新上面的index，如果直接写的话，可以去掉上的赋值，直接使用index:= arr[i]</span></span><br><span class="line">	<span class="comment">// index = arr[i]</span></span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> i &lt; j &#123;</span><br><span class="line">		<span class="comment">// 右边界不断向左移动，如果碰到比index小的数据</span></span><br><span class="line">		<span class="comment">// 则需要将左边的i对应的数据赋值为对应的值</span></span><br><span class="line">		<span class="keyword">for</span> i &lt; j &amp;&amp; arr[j] &gt;= index &#123;</span><br><span class="line">			j--</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="keyword">if</span> i &lt; j &#123;</span><br><span class="line">			arr[i] = arr[j]</span><br><span class="line">			i++</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">// 左边界不断往右移动，如果碰到比index小的数据</span></span><br><span class="line">		<span class="comment">// 则将右边的这个数据赋值索引j对应的数据</span></span><br><span class="line">		<span class="keyword">for</span> i &lt; j &amp;&amp; arr[i] &lt;= index &#123;</span><br><span class="line">			i++</span><br><span class="line">		&#125;</span><br><span class="line"></span><br><span class="line">		<span class="keyword">if</span> i &lt; j &#123;</span><br><span class="line">			arr[j] = arr[i]</span><br><span class="line">			j--</span><br><span class="line">		&#125;</span><br><span class="line"></span><br><span class="line"></span><br><span class="line">	&#125;</span><br><span class="line">    <span class="comment">// 索引i表示的就是</span></span><br><span class="line">    arr[i] = index</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 排序左边子数组</span></span><br><span class="line">	sort(arr, left, i<span class="number">-1</span>)</span><br><span class="line">	<span class="comment">// 排序右边</span></span><br><span class="line">	sort(arr, i+<span class="number">1</span>, right)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">QuickSort</span><span class="params">(arr []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	sort(arr, <span class="number">0</span>, <span class="built_in">len</span>(arr)<span class="number">-1</span>)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">​</span><br></pre></td></tr></table></figure>
+
+<h4 id="基准关键字的选取"><a href="#基准关键字的选取" class="headerlink" title="基准关键字的选取"></a>基准关键字的选取</h4><p>常用的基准关键字的选取有以下方式:</p>
+<ol>
+<li>选取首尾，中间位置上的中值作为基准关键字</li>
+<li>选取随机数</li>
+</ol>
+<h2 id="希尔排序"><a href="#希尔排序" class="headerlink" title="希尔排序"></a>希尔排序</h2><h3 id="原理-5"><a href="#原理-5" class="headerlink" title="原理"></a>原理</h3><p>类似插入排序，但是不是相邻的进行，而是会跳过几个位置</p>
+<h3 id="算法步骤-5"><a href="#算法步骤-5" class="headerlink" title="算法步骤"></a>算法步骤</h3><figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">&#123;38, 65, 97, 76, 13, 27, 49&#125;</span><br><span class="line">step为: 3   [38 65 97 76 13 27 49]  // 索引 3 和 0 进行比较并交换</span><br><span class="line">step为: 3   [38 13 97 76 65 27 49]  // 索引 4 和 1 进行比较并交换</span><br><span class="line">step为: 3   [38 13 27 76 65 97 49]  // 索引 5 和 2 进行比较并交换</span><br><span class="line">step为: 3   [38 13 27 49 65 97 76]  // 索引 6 和 3 进行比较并交换</span><br><span class="line">step为: 1   [13 38 27 49 65 97 76]  // 索引 1 和 0 进行比较并交换</span><br><span class="line">step为: 1   [13 27 38 49 65 97 76]  // 索引 2 和 1 进行比较并交换</span><br><span class="line">step为: 1   [13 27 38 49 65 97 76]  // 索引 3 和 2 进行比较并交换</span><br><span class="line">step为: 1   [13 27 38 49 65 97 76]  // 索引 4 和 3 进行比较并交换</span><br><span class="line">step为: 1   [13 27 38 49 65 97 76]  // 索引 5 和 4 进行比较并交换</span><br><span class="line">step为: 1   [13 27 38 49 65 76 97]  // 索引 6 和 5 进行比较并交换</span><br></pre></td></tr></table></figure>
+
+<h3 id="代码实现-5"><a href="#代码实现-5" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">ShellSort</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="comment">// 步长</span></span><br><span class="line">	<span class="keyword">for</span> step := <span class="built_in">len</span>(nums) / <span class="number">2</span>; step &gt; <span class="number">0</span>; step /= <span class="number">2</span> &#123;</span><br><span class="line">		<span class="keyword">for</span> i := step ; i &lt; <span class="built_in">len</span>(nums); i++ &#123;</span><br><span class="line">			<span class="comment">// 直接插入排序</span></span><br><span class="line">			<span class="keyword">if</span> nums[i] &lt; nums[i-step] &#123;</span><br><span class="line">				j, tmp := i, nums[i]</span><br><span class="line">				<span class="comment">// 找出同一组中比tmp小的值，往后面移动step个位置</span></span><br><span class="line">				<span class="keyword">for</span> j &gt;= step &amp;&amp; tmp &lt; nums[j-step] &#123;</span><br><span class="line">					nums[j] = nums[j-step]</span><br><span class="line">					j -= step</span><br><span class="line">				&#125;</span><br><span class="line">				nums[j] = tmp</span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<h2 id="堆排序"><a href="#堆排序" class="headerlink" title="堆排序"></a>堆排序</h2><h3 id="原理-6"><a href="#原理-6" class="headerlink" title="原理"></a>原理</h3><p>这里说一下递增排序，使用大根堆</p>
+<p>大根堆有一个特点，那就是堆的顶部是整个数组中最大的元素，一个比较简单的想法就是，我把这个元素拿出来，然后插入到其他的数组中，堆中 <code>pop</code> 出堆顶的元素，依次进行，便可以获取到一个排序序列，不过这种思路需要多余的一个数组，其实没有必要，我们来自己看看删除元素的过程。</p>
+<p>首先，将堆顶的元素和最后一个元素进行交换，然后 <code>size--</code>，进行向下冒泡 <code>down</code>，删除掉最后一个元素。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">pop</span><span class="params">(arr *[]<span class="keyword">int</span>)</span> <span class="title">int</span></span> &#123;</span><br><span class="line">	nums := *arr</span><br><span class="line">	n := <span class="built_in">len</span>(nums) - <span class="number">1</span></span><br><span class="line">    <span class="comment">// 交换</span></span><br><span class="line">	nums[<span class="number">0</span>], nums[n] = nums[n], nums[<span class="number">0</span>]</span><br><span class="line">	down(nums, <span class="number">0</span>, n)</span><br><span class="line">	x := nums[n]</span><br><span class="line">	<span class="comment">// 删除最后一个元素</span></span><br><span class="line">	*arr = (*arr)[:n]</span><br><span class="line">	<span class="keyword">return</span> x</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>注意这里删除最后一个元素，我们可以把这个元素保留在这里，但是让 <code>down</code> 的时候不接触到这个元素不就行了？这个很好实现，因为一般我们都是使用元素的长度作为 <code>down</code> 的一个 <code>size</code> 参数，我们指定一下就好，主要的逻辑代码如下：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">heapSort</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	size := <span class="built_in">len</span>(nums)</span><br><span class="line">	<span class="comment">// 首先建堆</span></span><br><span class="line">	buildHeap(nums)</span><br><span class="line">	<span class="comment">// 然后这个时候最大的元素在第一个</span></span><br><span class="line">	<span class="keyword">for</span> size &gt; <span class="number">1</span> &#123;</span><br><span class="line">		<span class="comment">// 第一个元素和最后一个进行交换</span></span><br><span class="line">		nums[<span class="number">0</span>], nums[size<span class="number">-1</span>] = nums[size<span class="number">-1</span>], nums[<span class="number">0</span>]</span><br><span class="line">		size--</span><br><span class="line">		down(nums, <span class="number">0</span>, size)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="代码实现-6"><a href="#代码实现-6" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 建大根堆</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">buildHeap</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	size := <span class="built_in">len</span>(nums)</span><br><span class="line">	<span class="keyword">for</span> i := size / <span class="number">2</span>; i &gt;= <span class="number">0</span>; i-- &#123;</span><br><span class="line">		down(nums, i, size)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 插入元素的时候需要使用</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">up</span><span class="params">(nums []<span class="keyword">int</span>, i <span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="keyword">for</span> &#123;</span><br><span class="line">		<span class="comment">// 父结点计算公式！！</span></span><br><span class="line">		parent := (i - <span class="number">1</span>) / <span class="number">2</span></span><br><span class="line">		<span class="comment">// 如果父结点大于子节点了，说明不需要调换，已经满足条件了</span></span><br><span class="line">		<span class="comment">// 如果 i == parent 说明 i = 0 了，没有父结点，也不需要调换</span></span><br><span class="line">		<span class="keyword">if</span> i == parent || nums[parent] &gt; nums[i] &#123;</span><br><span class="line">			<span class="keyword">break</span></span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">// 父结点没有子节点i的值大，需要调换</span></span><br><span class="line">		nums[parent], nums[i] = nums[i], nums[parent]</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 初始化的时候需要建堆</span></span><br><span class="line"><span class="comment">// 删除元素的时候需要down：</span></span><br><span class="line"><span class="comment">// 将第一个元素和最后一个元素进行调换, 然后重新 down(nums, 0, size)</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">down</span><span class="params">(nums []<span class="keyword">int</span>, i <span class="keyword">int</span>, size <span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	left, right := <span class="number">2</span>*i+<span class="number">1</span>, <span class="number">2</span>*i+<span class="number">2</span></span><br><span class="line">	j := i</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 找到最大的元素的下标</span></span><br><span class="line">	<span class="keyword">if</span> left &lt; size &amp;&amp; nums[left] &gt; nums[j] &#123;</span><br><span class="line">		j = left</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">if</span> right &lt; size &amp;&amp; nums[right] &gt; nums[j] &#123;</span><br><span class="line">		j = right</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">if</span> j != i &#123;</span><br><span class="line">		nums[i], nums[j] = nums[j], nums[i]</span><br><span class="line">		down(nums, j, size)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 不用递归也可以</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">down2</span><span class="params">(nums []<span class="keyword">int</span>, i, size <span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	<span class="keyword">for</span> &#123;</span><br><span class="line">		left, right := i*<span class="number">2</span>+<span class="number">1</span>, i*<span class="number">2</span>+<span class="number">2</span></span><br><span class="line">		<span class="comment">// 说明i是叶子节点</span></span><br><span class="line">		<span class="keyword">if</span> left &gt;= size &#123;</span><br><span class="line">			<span class="keyword">break</span></span><br><span class="line">		&#125;</span><br><span class="line">		<span class="comment">// 找到最大的节点</span></span><br><span class="line">		largest := i</span><br><span class="line">		<span class="keyword">if</span> left &lt; size &amp;&amp; nums[left] &gt; nums[largest] &#123;</span><br><span class="line">			largest = left</span><br><span class="line">		&#125;</span><br><span class="line">		<span class="keyword">if</span> right &lt; size &amp;&amp; nums[right] &gt; nums[largest] &#123;</span><br><span class="line">			largest = right</span><br><span class="line">		&#125;</span><br><span class="line"></span><br><span class="line">		<span class="keyword">if</span> largest != i &#123;</span><br><span class="line">			nums[i], nums[largest] = nums[largest], nums[i]</span><br><span class="line">			i = largest</span><br><span class="line">		&#125; <span class="keyword">else</span> &#123;</span><br><span class="line">			<span class="comment">// 如果最大的节点就是本身，那么后面也不需要进行操作了</span></span><br><span class="line">			<span class="keyword">break</span></span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 从堆中弹出一个数</span></span><br><span class="line"><span class="comment">// 首先将堆顶的元素和最后一个元素进行调换，然后进行down操作</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">pop</span><span class="params">(arr *[]<span class="keyword">int</span>)</span> <span class="title">int</span></span> &#123;</span><br><span class="line">	nums := *arr</span><br><span class="line">	n := <span class="built_in">len</span>(nums) - <span class="number">1</span></span><br><span class="line">	nums[<span class="number">0</span>], nums[n] = nums[n], nums[<span class="number">0</span>]</span><br><span class="line">	down(nums, <span class="number">0</span>, n)</span><br><span class="line">	x := nums[n]</span><br><span class="line"></span><br><span class="line">	*arr = (*arr)[:n]</span><br><span class="line">	<span class="keyword">return</span> x</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">HeapSort</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">	size := <span class="built_in">len</span>(nums)</span><br><span class="line">	<span class="comment">// 首先建堆</span></span><br><span class="line">	buildHeap(nums)</span><br><span class="line">	<span class="comment">// 然后这个时候最大的元素在第一个</span></span><br><span class="line">	<span class="keyword">for</span> size &gt; <span class="number">1</span> &#123;</span><br><span class="line">		<span class="comment">// 第一个元素和最后一个进行交换</span></span><br><span class="line">		nums[<span class="number">0</span>], nums[size<span class="number">-1</span>] = nums[size<span class="number">-1</span>], nums[<span class="number">0</span>]</span><br><span class="line">		size--</span><br><span class="line">		down(nums, <span class="number">0</span>, size)</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h2 id="计数排序"><a href="#计数排序" class="headerlink" title="计数排序"></a>计数排序</h2><h3 id="原理-7"><a href="#原理-7" class="headerlink" title="原理"></a>原理</h3><p>设置一个长度为元素最大值最小值的空间，将元素一个一个对应一个索引，如果这个索引中已经存在元素，那么对应的值+1，说明这个索引处对应多个元素，最后遍历一遍这个索引空间，值为0的不需要添加，值为多个的一次添加到原数组中</p>
+<p>计数排序适合于数组中的值在一定范围内的数据，比如说年龄，数据可能需要进行整理，比如 [10000, 20000] 的数据，我们可以首先整理为 [0, 10000]，然后再转换回去。</p>
+<h3 id="代码实现-7"><a href="#代码实现-7" class="headerlink" title="代码实现"></a>代码实现</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 比如我们需要排序年龄，那么我们可以估算年龄在[0,200]中</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">CountingSort</span><span class="params">(nums []<span class="keyword">int</span>)</span></span> &#123;</span><br><span class="line">    count := <span class="built_in">make</span>([]<span class="keyword">int</span>, <span class="number">200</span>)</span><br><span class="line">    <span class="keyword">for</span> _, num := <span class="keyword">range</span> nums &#123;</span><br><span class="line">        count[num] ++ </span><br><span class="line">    &#125;</span><br><span class="line">    index := <span class="number">0</span> </span><br><span class="line">    <span class="keyword">for</span> i :=<span class="number">0</span>; i &lt; <span class="built_in">len</span>(count); i ++ &#123;</span><br><span class="line">        <span class="comment">// 出现了多少次，排序后添加到原数组多少次</span></span><br><span class="line">        <span class="keyword">for</span> j:= <span class="number">0</span>; j &lt; count[i]; j++ &#123;</span><br><span class="line">            nums[index] = i </span><br><span class="line">            index ++ </span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>下表给出了每种排序算法的稳定性和效率的比较：</p>
+<table>
+<thead>
+<tr>
+<th>排序方法</th>
+<th>最好时间</th>
+<th>平均时间</th>
+<th>最坏时间</th>
+<th>辅助储存</th>
+<th>稳定性</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>简单选择排序</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(1)$$</td>
+<td>不稳定</td>
+<td>n小时较好</td>
+</tr>
+<tr>
+<td>直接插入排序</td>
+<td>$$O(n)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(1)$$</td>
+<td>稳定</td>
+<td>大部分有序时较好</td>
+</tr>
+<tr>
+<td>冒泡排序</td>
+<td>$$O(n)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(1)$$</td>
+<td>稳定</td>
+<td>n小时较好</td>
+</tr>
+<tr>
+<td>希尔排序</td>
+<td>$$O(n)$$</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(sn)\ 1&lt;s&lt;2$$</td>
+<td>$$O(1)$$</td>
+<td>不稳定</td>
+<td>s是所选分组</td>
+</tr>
+<tr>
+<td>快速排序</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n^2)$$</td>
+<td>$$O(\log n)$$</td>
+<td>不稳定</td>
+<td>n大时较好</td>
+</tr>
+<tr>
+<td>堆排序</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(1)$$</td>
+<td>不稳定</td>
+<td>n大时较好</td>
+</tr>
+<tr>
+<td>归并排序</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n\log n)$$</td>
+<td>$$O(n)$$</td>
+<td>稳定</td>
+<td>n大时较好</td>
+</tr>
+</tbody></table>
+<p>如果想要更直观的看排序过程，推荐使用 <a href="https://www.cs.usfca.edu/~galles/visualization/Algorithms.html">Data Structure Visualizations</a> 这个网站进行理解。</p>
+]]></content>
+      <categories>
+        <category>algorithm</category>
+      </categories>
+      <tags>
+        <tag>sort</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Git 基本使用</title>
+    <url>/2021/12/18/git/basic/</url>
+    <content><![CDATA[<h2 id="概念"><a href="#概念" class="headerlink" title="概念"></a>概念</h2><p>当我们看到 <code>Git</code> 的时候，涌现上来的第一个想法就是 <code>Git</code> 是什么，我们为什么要使用 <code>Git</code> ？</p>
+<p>首先解决一下第一个问题，Git 是什么？</p>
+<p><code>Git</code> 官网上有一段说明: <code>Git</code>  is a free and open source distributed version control system designed to handle everything from small to very large projects with speed and efficiency. 翻译一下就是说：<code>Git</code> 是一个免费的开源分布式版本控制系统，旨在快速且高效地处理从小型到大型的所有项目。</p>
+<span id="more"></span>
+
+<p>这里简单说明一下版本控制系统是什么，打个比方，我们有一段完整的代码，不过现在我们需要在此基础上进行新功能的开发，开发完成之后上线了，不过很不幸，上线之后出现了很多 bug，那应该怎么处理，不用想，第一件事肯定是回滚，采用之前运行正确的代码，如果我们没有采用 <code>Git</code> ，那我们就需要保存一份之前的源代码了，如果我们采用 <code>Git</code> ，那么我们可以很方便的将代码切换到历史中的每一条记录，这就叫做版本控制。</p>
+<p>介绍完了什么是 <code>Git</code> ，那么我们为什么要用 <code>Git</code>  呢？ </p>
+<p>首先，互联网公司都在用 <code>Git</code> ，当你参加工作的时候，无法避免地会使用 <code>Git</code> ，比如暑期在字节实习的时候，公司内部自己搭建了一个 <code>Git</code> lab，代码的提交都是使用 <code>Git</code>  进行的，你如果不知道怎么使用 <code>Git</code> ，那么你写好的代码就只能让其他同学帮忙上传，效率极低，而且同学不可能一直帮你吧，所以说学习 <code>Git</code>  很必要。</p>
+<p>其次，<code>Git</code> 的分布式版本控制系统真的很棒，在公司里面一个项目往往是一组同学一块开发，不可能单枪匹马，不同的同学负责不同的模块，这个时候 <code>Git</code>  的作用就更明显了，开发不同 <code>feature</code> 的同学统一从仓库上拉取代码，然后在本地另外创建一个分支进行新功能开发，开发完成，测试通过，代码进行 <code>review</code> 之后合入主干分支，极大的提高了编码效率。</p>
+<h2 id="安装"><a href="#安装" class="headerlink" title="安装"></a>安装</h2><p>访问 <a href="https://git-scm.com/">Git 官网</a> 下载，如果是 <code>Linux</code> 系统，基本上都会预装 <code>Git</code> ，如果没有，对于 <code>Ubuntu</code> 来说可以使用下面的命令进行安装。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">sudo apt install git -all</span><br></pre></td></tr></table></figure>
+
+<p>安装完成之后，进入命令行输入下方命令进行检查，如果输出版本号，则说明安装成功。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git  --version</span><br><span class="line">git version 2.25.1</span><br></pre></td></tr></table></figure>
+
+
+
+<h2 id="使用"><a href="#使用" class="headerlink" title="使用"></a>使用</h2><p>首先介绍一下 <code>Git</code>  中的基本术语：<code>工作区, 暂存区，版本库</code>。</p>
+<ul>
+<li><strong>工作区</strong>：就是在电脑里能看到的目录，或者直接认为是我们在编写项目的目录。</li>
+<li><strong>暂存区</strong>：一般存放在 <code>.git</code> 目录下的 <code>index</code> 文件中，所以我们把暂存区有时也叫作索引 (index)。</li>
+<li><strong>版本库</strong>：工作区有一个隐藏目录 <code>.git</code>，不算工作区，而是 <code>Git</code>  的版本库，提交到这里都会形成一个版本，想要要切换到任意版本都很简单。</li>
+</ul>
+<p>下面我们就开始介绍一些常用的命令</p>
+<h3 id="配置"><a href="#配置" class="headerlink" title="配置"></a>配置</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 配置全局用户，去掉 --global 参数表示配置当前目录用户</span></span><br><span class="line">git config --global user.name <span class="string">&quot;xxx&quot;</span></span><br><span class="line">git config --global user.email <span class="string">&quot;xxx&quot;</span></span><br><span class="line"></span><br><span class="line"><span class="comment"># 查看配置</span></span><br><span class="line">git config --list</span><br></pre></td></tr></table></figure>
+
+<h3 id="基本操作"><a href="#基本操作" class="headerlink" title="基本操作"></a>基本操作</h3><h4 id="创建仓库"><a href="#创建仓库" class="headerlink" title="创建仓库"></a>创建仓库</h4><p>有两种方式，下面分别讲解：</p>
+<p>一种是在本地直接创建，使用 <code>git init</code>，创建之后会生成一个 <code>.git</code> 目录</p>
+<ul>
+<li>在当前目录进行创建：<code>git init</code></li>
+<li>在指定目录进行创建：<code>git init repo</code></li>
+</ul>
+<p>另外一种方式是从远程仓库克隆下来，使用 <code>git clone</code></p>
+<ul>
+<li>克隆到目录，目录名为仓库名：<code>git clone</code></li>
+<li>克隆到指定目录：<code>git clone &lt;dir&gt;</code></li>
+</ul>
+<h4 id="添加文件"><a href="#添加文件" class="headerlink" title="添加文件"></a>添加文件</h4><p><code>git add</code> 命令可将该文件添加到暂存区，可以支持多个文件以及通配符</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 添加一个文件</span></span><br><span class="line">git add README.md</span><br><span class="line"><span class="comment"># 添加 src 目录下的文件</span></span><br><span class="line">git add src/</span><br><span class="line"><span class="comment"># 添加当前目录所有</span></span><br><span class="line">git add . </span><br></pre></td></tr></table></figure>
+
+<h4 id="查看状态"><a href="#查看状态" class="headerlink" title="查看状态"></a>查看状态</h4><p><code>git status</code> 查看仓库当前的状态，显示有变更的文件。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ <span class="built_in">echo</span> <span class="string">&quot;Hello World&quot;</span> &gt; README.md</span><br><span class="line">$ git status</span><br><span class="line">On branch master</span><br><span class="line"></span><br><span class="line">No commits yet</span><br><span class="line"></span><br><span class="line">Untracked files:</span><br><span class="line">  (use <span class="string">&quot;git add &lt;file&gt;...&quot;</span> to include <span class="keyword">in</span> what will be committed)</span><br><span class="line">        README.md</span><br><span class="line"></span><br><span class="line">nothing added to commit but untracked files present (use <span class="string">&quot;git add&quot;</span> to track)</span><br><span class="line"></span><br><span class="line">$ git add README.md</span><br><span class="line">$ git status</span><br><span class="line">On branch master</span><br><span class="line"></span><br><span class="line">No commits yet</span><br><span class="line"></span><br><span class="line">Changes to be committed:</span><br><span class="line">  (use <span class="string">&quot;git rm --cached &lt;file&gt;...&quot;</span> to unstage)</span><br><span class="line">        new file:   README.md</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看差异"><a href="#查看差异" class="headerlink" title="查看差异"></a>查看差异</h4><p><code>git diff</code> 可以比较同一文件在<strong>暂存区和工作区</strong>的差异。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git diff README.md</span><br><span class="line">diff --git a/branch/README.md b/branch/README.md</span><br><span class="line">index ce01362..3b18e51 100644</span><br><span class="line">--- a/branch/README.md</span><br><span class="line">+++ b/branch/README.md</span><br><span class="line">@@ -1 +1 @@</span><br><span class="line">-hello</span><br><span class="line">+hello world</span><br></pre></td></tr></table></figure>
+
+<h4 id="提交本地仓库"><a href="#提交本地仓库" class="headerlink" title="提交本地仓库"></a>提交本地仓库</h4><p><code>git commit</code> 可以将代码添加到本地仓库，添加到这里的代码之后可以恢复。</p>
+<h4 id="回退版本"><a href="#回退版本" class="headerlink" title="回退版本"></a>回退版本</h4><p><code>get reset</code> 可以将代码回退到指定的版本，默认使用 <code>--mixed</code> 。</p>
+<ul>
+<li><code>git reset --mixed</code>：回退到指定版本，工作区文件内容保持不变，但是会删除暂存区。</li>
+<li><code>git reset --soft</code>：回退到指定的版本，保留工作目录和暂存区中的内容，并把重置 HEAD 所带来的新的差异放进暂存区。</li>
+<li><code>git reset --hard</code>： 撤销工作区中所有未提交的修改内容，将暂存区与工作区都回到指定版本。</li>
+</ul>
+<h4 id="查看提交日志"><a href="#查看提交日志" class="headerlink" title="查看提交日志"></a>查看提交日志</h4><p><code>git log</code> 可以查看已经提交的日志记录</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git <span class="built_in">log</span></span><br><span class="line">commit eaf922fa1908cb6e9295570252ce3776f851bc16 (HEAD -&gt; master, dev)</span><br><span class="line">Author: junhaideng &lt;201648748@qq.com&gt;</span><br><span class="line">Date:   Fri Dec 17 19:21:53 2021 +0800</span><br><span class="line"></span><br><span class="line">    docs: add README.md</span><br><span class="line"> </span><br><span class="line">$ git <span class="built_in">log</span> --oneline</span><br><span class="line">7110de5 (HEAD -&gt; master) docs: add README.md</span><br></pre></td></tr></table></figure>
+
+
+
+<h3 id="分支操作"><a href="#分支操作" class="headerlink" title="分支操作"></a>分支操作</h3><h4 id="创建分支"><a href="#创建分支" class="headerlink" title="创建分支"></a>创建分支</h4><p><code>git branch &lt;branch name&gt;</code> 或者 <code>git checkout -b &lt;branch name&gt;</code> 都可以创建分支</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git checkout -b branch1</span><br><span class="line">Switched to a new branch <span class="string">&#x27;branch1&#x27;</span></span><br><span class="line">$ git branch branch2</span><br><span class="line">Switched to a new branch <span class="string">&#x27;branch2&#x27;</span></span><br></pre></td></tr></table></figure>
+
+
+
+<h4 id="切换分支"><a href="#切换分支" class="headerlink" title="切换分支"></a>切换分支</h4><p><code>git checkout &lt;branch name&gt;</code> 或者 <code>git switch &lt;branch name&gt;</code>，使用 <code>git checkout -</code> 可以切换到上一次所在的分支哦</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git checkout branch1</span><br><span class="line">Switched to branch <span class="string">&#x27;branch1&#x27;</span></span><br><span class="line">$ git switch branch2</span><br><span class="line">Switched to branch <span class="string">&#x27;branch2&#x27;</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="查看分支"><a href="#查看分支" class="headerlink" title="查看分支"></a>查看分支</h4><p><code>git branch</code> 查看所有的分支</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git branch</span><br><span class="line">  branch1</span><br><span class="line">  branch2</span><br><span class="line">* master</span><br></pre></td></tr></table></figure>
+
+<h4 id="删除分支"><a href="#删除分支" class="headerlink" title="删除分支"></a>删除分支</h4><p><code>git branch -d/-D &lt;branch name&gt;</code></p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git branch -D branch2</span><br><span class="line">Deleted branch branch2 (was eaf922f).</span><br></pre></td></tr></table></figure>
+
+
+
+<h4 id="重命名分支"><a href="#重命名分支" class="headerlink" title="重命名分支"></a>重命名分支</h4><p><code>git branch -m/-M &lt;old&gt; &lt;new&gt;</code></p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git branch -m branch1 dev</span><br><span class="line">$ git branch</span><br><span class="line">  dev</span><br><span class="line">* master</span><br></pre></td></tr></table></figure>
+
+<h4 id="合并分支"><a href="#合并分支" class="headerlink" title="合并分支"></a>合并分支</h4><p><code>git merge</code> 可以将当前分支和指定分支提交合并</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git branch</span><br><span class="line">* feat/say_hello</span><br><span class="line">  master</span><br><span class="line">$ git checkout -</span><br><span class="line">Switched to branch <span class="string">&#x27;master&#x27;</span></span><br><span class="line">$ git merge feat/say_hello</span><br><span class="line">Updating 7110de5..19dad58</span><br><span class="line">Fast-forward</span><br><span class="line"> README.md | 2 +-</span><br><span class="line"> 1 file changed, 1 insertion(+), 1 deletion(-)</span><br></pre></td></tr></table></figure>
+
+<h3 id="标签操作"><a href="#标签操作" class="headerlink" title="标签操作"></a>标签操作</h3><h4 id="创建标签"><a href="#创建标签" class="headerlink" title="创建标签"></a>创建标签</h4><p>Git 中标签有两种：</p>
+<ul>
+<li>轻量标签：<ul>
+<li><code>git tag &lt;tag name&gt;</code></li>
+<li>不保存其他任何信息，相当于某个提交的信息</li>
+</ul>
+</li>
+<li>附注标签：<ul>
+<li><code>git tag -a &lt;tag name&gt;</code></li>
+<li>可以显示打标签者的信息，时间和附注消息，然后显示具体的提交信息</li>
+</ul>
+</li>
+</ul>
+<p>也可以指定某个提交打标签: <code>git tag xx &lt;commit id&gt;</code></p>
+<h4 id="删除标签"><a href="#删除标签" class="headerlink" title="删除标签"></a>删除标签</h4><h5 id="删除本地标签"><a href="#删除本地标签" class="headerlink" title="删除本地标签"></a>删除本地标签</h5><p><code>git tag -d &lt;tag name&gt;</code> 删除标签</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git tag -d v1.0</span><br><span class="line">Deleted tag <span class="string">&#x27;v1.0&#x27;</span> (was 15f051b)</span><br></pre></td></tr></table></figure>
+
+<h5 id="删除远程标签"><a href="#删除远程标签" class="headerlink" title="删除远程标签"></a>删除远程标签</h5><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">git push origin :refs/tags/&lt;tag name&gt;</span><br><span class="line">git push origin --delete &lt;tag name&gt;</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看标签"><a href="#查看标签" class="headerlink" title="查看标签"></a>查看标签</h4><p><code>git tag</code> 可以显示所有的标签，我们也可以使用 <code>git tag -l/--list</code>，并且可以指定特定模式匹配</p>
+<h4 id="显示标签内容"><a href="#显示标签内容" class="headerlink" title="显示标签内容"></a>显示标签内容</h4><p><code>git show &lt;tag name&gt;</code> 可以展示标签对应的提交信息，对于附注标签还可以显示添加的额外信息</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ git tag v1.0 -m <span class="string">&quot;tag demo&quot;</span></span><br><span class="line">$ git tag</span><br><span class="line">v1.0</span><br><span class="line">$ git show v1.0</span><br><span class="line">tag v1.0</span><br><span class="line">Tagger: junhaideng &lt;201648748@qq.com&gt;</span><br><span class="line">Date:   Sat Dec 18 09:43:27 2021 +0800</span><br><span class="line"></span><br><span class="line">tag demo</span><br><span class="line"></span><br><span class="line">commit 54f9e2cbea36cdd28718a7a0ff847e005442142e (HEAD -&gt; master, tag: v1.0)</span><br><span class="line">Author: junhaideng &lt;201648748@qq.com&gt;</span><br><span class="line">Date:   Fri Dec 17 20:26:25 2021 +0800</span><br><span class="line"></span><br><span class="line">    add: tag</span><br><span class="line"></span><br><span class="line">diff --git a/tag/tag b/tag/tag</span><br><span class="line">new file mode 100644</span><br><span class="line">index 0000000..ce01362</span><br><span class="line">--- /dev/null</span><br><span class="line">+++ b/tag/tag</span><br><span class="line">@@ -0,0 +1 @@</span><br><span class="line">+hello</span><br></pre></td></tr></table></figure>
+
+<h3 id="远程仓库"><a href="#远程仓库" class="headerlink" title="远程仓库"></a>远程仓库</h3><h4 id="关联仓库"><a href="#关联仓库" class="headerlink" title="关联仓库"></a>关联仓库</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 一般将 name 取为 origin</span></span><br><span class="line"><span class="comment"># url 可以是 ssh,http 等</span></span><br><span class="line">git remote add &lt;name&gt; &lt;url&gt;</span><br></pre></td></tr></table></figure>
+
+<h4 id="拉取最新提交"><a href="#拉取最新提交" class="headerlink" title="拉取最新提交"></a>拉取最新提交</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 只拉取最新提交</span></span><br><span class="line">git fetch </span><br><span class="line"><span class="comment"># 拉取之后合并当前分支</span></span><br><span class="line"><span class="comment"># 相当于 `Git`  fetch + `Git`  merge</span></span><br><span class="line">git pull</span><br></pre></td></tr></table></figure>
+
+<h4 id="推送最新提交"><a href="#推送最新提交" class="headerlink" title="推送最新提交"></a>推送最新提交</h4><p>本地写完代码之后，提交到仓库中</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">git push [name] [branch name]</span><br></pre></td></tr></table></figure>
+
+
+
+<h3 id="忽略某些文件"><a href="#忽略某些文件" class="headerlink" title="忽略某些文件"></a>忽略某些文件</h3><p>有时候，我们有些文件不想要提交到仓库中间，比如说编译的中间仓库，那么我们可以创建一个 <code>.gitignore</code> 文件，并且在其中进行配置</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line"># 忽略 .vscode 目录，无论根目录下的还是子目录下的</span><br><span class="line">.vscode/</span><br><span class="line"># 忽略根目录下的 target 文件夹</span><br><span class="line">/target/</span><br><span class="line"># 忽略所有的 .exe 文件</span><br><span class="line">*.exe</span><br><span class="line"># 指定忽略某个文件</span><br><span class="line">/src/hello.go</span><br><span class="line"># 不过滤 src 目录</span><br><span class="line">!src/</span><br></pre></td></tr></table></figure>
+
+<p>更加详细的见：<a href="https://git-scm.com/docs/gitignore">gitignore</a></p>
+<h3 id="规范"><a href="#规范" class="headerlink" title="规范"></a>规范</h3><p>Git 的提交应该符合一定的规定，这样方便操作，比如</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">type: &lt;description&gt;</span><br></pre></td></tr></table></figure>
+<p><code>type</code> 一般为下面的类型：</p>
+<ul>
+<li><code>feat</code>: 新功能（feature）</li>
+<li><code>fix</code>: 修补bug</li>
+<li><code>docs</code>: 文档（documentation）</li>
+<li><code>style</code>: 格式（不影响代码运行的变动）</li>
+<li><code>refactor</code>: 重构（即不是新增功能，也不是修改bug的代码变动）</li>
+<li><code>test</code>: 增加测试</li>
+<li><code>chore</code>: 构建过程或辅助工具的变动</li>
+<li><code>add</code>: 添加某个文件等</li>
+<li><code>change</code>: 对某个文件进行改变，但不改变原来的功能</li>
+<li><code>beautify</code>: 对界面进行美化</li>
+</ul>
+<p>此外也可以参考： <a href="https://www.conventionalcommits.org/zh-hans/v1.0.0/">约定式提交</a></p>
+<h3 id="思维导图"><a href="#思维导图" class="headerlink" title="思维导图"></a>思维导图</h3><img src="git.png">
+
+<div style="font-size:10; text-align:center">注：图片来自网络</div>
+]]></content>
+      <categories>
+        <category>git</category>
+      </categories>
+      <tags>
+        <tag>git</tag>
+        <tag>tools</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Golang 选项模式</title>
+    <url>/2021/07/13/golang/options/</url>
+    <content><![CDATA[<h2 id="需求"><a href="#需求" class="headerlink" title="需求"></a>需求</h2><p>Golang不支持在函数定义的时候声明默认值，也就是说我们不能够使用类似下面的代码</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">New</span><span class="params">(addr <span class="keyword">string</span>=&quot;localhost&quot;,  port <span class="keyword">string</span>=&quot;8080&quot;)</span></span>&#123;</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>并且也不支持函数的重载，函数名不能够重复，无法根据需要的参数数量创建不同的函数形式，也就是我们不能使用下面的方式</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">New</span><span class="params">(addr <span class="keyword">string</span>)</span></span>&#123;</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">// 再次使用同样的函数名会报错</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">New</span><span class="params">(addr <span class="keyword">string</span>, port <span class="keyword">string</span>)</span></span>&#123;</span><br><span class="line">  ...</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<span id="more"></span>
+
+<h2 id="返回默认对象"><a href="#返回默认对象" class="headerlink" title="返回默认对象"></a>返回默认对象</h2><p>那么我们如何才能设置默认值呢？一种很自然的方式比如说，我们创建对象的时候就返回一个带有默认值的对象</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> myStruct <span class="keyword">struct</span> &#123;</span><br><span class="line">	Host <span class="keyword">string</span></span><br><span class="line">	Port <span class="keyword">string</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">New</span><span class="params">()</span> *<span class="title">myStruct</span></span>&#123;</span><br><span class="line">  <span class="comment">// 返回一个带有默认值的对象</span></span><br><span class="line">  <span class="keyword">return</span> &amp;myStruct&#123;</span><br><span class="line">    Host: <span class="string">&quot;0.0.0.0&quot;</span>,</span><br><span class="line">    Port: <span class="string">&quot;8080&quot;</span>,</span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>然后我们如果需要修改参数，那么我们可以手动去修改</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">config := New()</span><br><span class="line"><span class="comment">// 手动修改</span></span><br><span class="line">config.Port = <span class="string">&quot;8000&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>上面的这种方式其实已经可以解决我们的需求，但是还是不够好，因为这种方式会直接<code>暴露</code>结构体中的字段，结构体中的字段名首字母必须大写，并且用户进行修改的时候会直接对字段进行修改，无法对设置的参数进行校验。</p>
+<h2 id="Option模式"><a href="#Option模式" class="headerlink" title="Option模式"></a>Option模式</h2><p>下面我们主要讲解 <code>Option模式</code>，也就是 <code>函数选项模式</code>，这种模式下在我们设置默认值的同时支持检验参数。</p>
+<p>Option 模式为 Golang 的开发者提供了将一个函数的参数设置为可选的功能，也就是说我们可以选择参数中的某几个，并且可以按任意顺序传入参数。</p>
+<p>下面我们来看看具体如何使用：</p>
+<p>首先，我们需要设置一个结构体包括我们需要设置的一些参数</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> Config <span class="keyword">struct</span>&#123;</span><br><span class="line">  Addr <span class="keyword">string</span> </span><br><span class="line">  Host <span class="keyword">string</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>然后，我们需要定义一个<code>Option</code>函数类型可以修改我们的参数结构体</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> Option <span class="function"><span class="keyword">func</span><span class="params">(c *Config)</span></span></span><br></pre></td></tr></table></figure>
+
+<p>对于我们需要进行修改的参数，我们可以声明对应的函数来修改参数值，这里利用了闭包的特性。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithHost</span><span class="params">(host <span class="keyword">string</span>)</span> <span class="title">Option</span></span> &#123;</span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">(c *Config)</span></span> &#123;</span><br><span class="line">		c.Host = host</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithPort</span><span class="params">(port <span class="keyword">string</span>)</span> <span class="title">Option</span></span> &#123;</span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">(c *Config)</span></span> &#123;</span><br><span class="line">		c.Port = port</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>接着，我们需要设置一个默认值，如下，也就是用户没有设置任何参数的时候所得到的值</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">var</span> defaultConfig = Config&#123;</span><br><span class="line">	Host: <span class="string">&quot;0.0.0.0&quot;</span>,</span><br><span class="line">	Port: <span class="string">&quot;8080&quot;</span>,</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>最后，提供一个函数接口，创建对象的时候，用户可以执行一系列的<code>Option</code>来修改默认的参数</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> myStruct <span class="keyword">struct</span> &#123;</span><br><span class="line">	host <span class="keyword">string</span></span><br><span class="line">	port <span class="keyword">string</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">New</span><span class="params">(opts ...Option)</span> *<span class="title">myStruct</span></span> &#123;</span><br><span class="line">	<span class="comment">// 默认情况下使用默认参数</span></span><br><span class="line">	config := defaultConfig</span><br><span class="line"></span><br><span class="line">	<span class="keyword">for</span> _, opt := <span class="keyword">range</span> opts &#123;</span><br><span class="line">		<span class="comment">// opt 就是一个函数，以 *Config为参数，能够修改其中的内容</span></span><br><span class="line">		opt(&amp;config)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">return</span> &amp;myStruct&#123;</span><br><span class="line">		host: config.Host,</span><br><span class="line">		port: config.Port,</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>这里还有另外一种方式实现，思路差不多，直接上代码</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> myStruct <span class="keyword">struct</span> &#123;</span><br><span class="line">	host <span class="keyword">string</span></span><br><span class="line">	port <span class="keyword">string</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 设置一个接口类型</span></span><br><span class="line"><span class="keyword">type</span> Option <span class="keyword">interface</span> &#123;</span><br><span class="line">	apply(*myStruct)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 声明一个类型，以需要修改的结构体为参数</span></span><br><span class="line"><span class="keyword">type</span> optinFunc <span class="function"><span class="keyword">func</span><span class="params">(*myStruct)</span></span></span><br><span class="line"></span><br><span class="line"><span class="comment">// 实现Option接口</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(f optinFunc)</span> <span class="title">apply</span><span class="params">(m *myStruct)</span></span> &#123;</span><br><span class="line">	f(m)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 修改参数</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithHost</span><span class="params">(host <span class="keyword">string</span>)</span> <span class="title">Option</span></span> &#123;</span><br><span class="line">	<span class="keyword">return</span> optinFunc(<span class="function"><span class="keyword">func</span><span class="params">(ms *myStruct)</span></span> &#123;</span><br><span class="line">		ms.host = host</span><br><span class="line">	&#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">WithPort</span><span class="params">(port <span class="keyword">string</span>)</span> <span class="title">Option</span></span> &#123;</span><br><span class="line">	<span class="keyword">return</span> optinFunc(<span class="function"><span class="keyword">func</span><span class="params">(ms *myStruct)</span></span> &#123;</span><br><span class="line">		ms.port = port</span><br><span class="line">	&#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">var</span> defaultOne = myStruct&#123;</span><br><span class="line">	host: <span class="string">&quot;0.0.0.0&quot;</span>,</span><br><span class="line">	port: <span class="string">&quot;8080&quot;</span>,</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 创建一个新的对象</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">New</span><span class="params">(options ...Option)</span> *<span class="title">myStruct</span></span> &#123;</span><br><span class="line">	m := defaultOne</span><br><span class="line">	<span class="keyword">for</span> _, opt := <span class="keyword">range</span> options &#123;</span><br><span class="line">		opt.apply(&amp;m)</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> &amp;m</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 可以认为我们创建的WithHost, WithPort</span></span><br><span class="line"><span class="comment">// 就是一个可以修改struct字段的函数</span></span><br><span class="line"><span class="comment">// 一般我们会暴露这些函数给使用</span></span><br><span class="line"><span class="comment">// 但是在包内部我们可以修改结构体的私有成员</span></span><br></pre></td></tr></table></figure>
+
+
+<p>测试结果</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">fmt.Printf(<span class="string">&quot;%#v\n&quot;</span>, New())</span><br><span class="line">fmt.Printf(<span class="string">&quot;%#v\n&quot;</span>, New(WithHost(<span class="string">&quot;127.0.0.1&quot;</span>)))</span><br><span class="line">fmt.Printf(<span class="string">&quot;%#v\n&quot;</span>, New(WithHost(<span class="string">&quot;127.0.0.1&quot;</span>), WithPort(<span class="string">&quot;8000&quot;</span>)))</span><br><span class="line"><span class="comment">// 输出</span></span><br><span class="line"><span class="comment">// &amp;main.myStruct&#123;host:&quot;0.0.0.0&quot;, port:&quot;8080&quot;&#125;</span></span><br><span class="line"><span class="comment">// &amp;main.myStruct&#123;host:&quot;127.0.0.1&quot;, port:&quot;8080&quot;&#125;</span></span><br><span class="line"><span class="comment">// &amp;main.myStruct&#123;host:&quot;127.0.0.1&quot;, port:&quot;8000&quot;&#125;</span></span><br></pre></td></tr></table></figure>
+
+<p>虽然说，Option模式在设置参数的时候特别有用，而且显得十分优雅，但是通过对它的实现，我们也知道使用起来相对而言还是比较麻烦，需要添加很多函数</p>
+<img src="options.png">
+
+]]></content>
+      <categories>
+        <category>Golang</category>
+      </categories>
+      <tags>
+        <tag>Go</tag>
+        <tag>Language</tag>
+        <tag>design pattern</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>动手写一个 HTTP 正向代理</title>
+    <url>/2021/12/06/network/http-proxy/</url>
+    <content><![CDATA[<h2 id="概念"><a href="#概念" class="headerlink" title="概念"></a>概念</h2><p>首先我们来了解一下 <code>HTTP</code> 代理的相关概念，通常来说，有两类 <code>HTTP</code> 代理，一类是<code>正向代理</code>，一类是<code>反向代理</code>，虽都是代理，但仍有区别。</p>
+<p>我们平时使用的 <code>VPN</code> 就是正向代理，我们<strong>指定一个服务器</strong>，然后通过正向代理去连接这个服务器获取资源</p>
+<span id="more"></span>
+
+<img src="forward.svg">
+
+<p><code>Nginx</code> 是典型的反向代理服务器，可以用于负载均衡和缓存，我们<strong>不清楚服务器的地址</strong>，但是我们访问反向代理服务器的时候，它会自动为我们请求服务器，并且返回相应的内容。</p>
+<img src="reverse.svg">
+
+<blockquote>
+<p>总结：正向代理下，我们知道服务器的具体地址，反向代理下，我们只需要知道代理服务的地址，无需知道具体的服务端地址。</p>
+</blockquote>
+<p>这里，我们讲述正向代理，首先先来简单的回忆一下 HTTP 协议吧，也可以参考之前的 <a href="http://mp.weixin.qq.com/s?__biz=MzAwNDM4NTU0MA==&mid=2247484211&idx=1&sn=8fb8b397184d75b215e5961a23804b76&chksm=9b2dfd58ac5a744e782c56ed22eb50d599639f89c2b323ae8cb71e0328c5a7042640e4bd0590#rd">文章</a></p>
+<h2 id="HTTP-协议"><a href="#HTTP-协议" class="headerlink" title="HTTP 协议"></a>HTTP 协议</h2><p>HTTP 基于传输层协议而搭建的应用层协议，其实 HTTP 请求和响应没有什么很神奇的部分，就是一个 <code>Client/Server</code> 模型，客户端通过套接字发送数据，服务端解析之后进行处理，然后返回响应。</p>
+<p>这里只稍微介绍一下协议格式，想要了解更多的同学可以参考 <a href="https://www.rfc-editor.org/info/rfc2068">HTTP/1.1</a>，下面的内容均通过 <code>wireshark</code> 抓包获得。</p>
+<h2 id="请求"><a href="#请求" class="headerlink" title="请求"></a>请求</h2><p>格式如下：</p>
+<img src="request.png" height=200>
+
+<p>每一行均以 <code>\r\n</code> 结尾，请求体可以为空</p>
+<h2 id="响应"><a href="#响应" class="headerlink" title="响应"></a>响应</h2><p>格式如下：</p>
+<img src="response.png" >
+
+<p>每一行也是以 <code>\r\n</code> 结尾，响应体可以为空</p>
+<blockquote>
+<p>请求和响应在格式上的主要区别在第一行，也就是请求行和响应行的内容不一致，此外，请求和响应的头部取值也有所区别，部分头部只用于请求，部分头部只由于响应，但是常见的绝大多数头部在响应和请求中均可使用。</p>
+</blockquote>
+<p>我们如果要构造一个请求也很简单，创建一个套接字，然后发送上述格式的数据即可：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 连接服务器</span></span><br><span class="line">conn, err := net.Dial(<span class="string">&quot;tcp&quot;</span>, <span class="string">&quot;httpbin.org:80&quot;</span>)</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">  fmt.Println(<span class="string">&quot;Dial tcp err: &quot;</span>, err)</span><br><span class="line">  <span class="keyword">return</span> </span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 构造请求</span></span><br><span class="line">msg := strings.Builder&#123;&#125;</span><br><span class="line">msg.WriteString(<span class="string">&quot;GET /get HTTP/1.1\r\n&quot;</span>)</span><br><span class="line">msg.WriteString(<span class="string">&quot;Host: httpbin.org\r\n&quot;</span>)</span><br><span class="line">msg.WriteString(<span class="string">&quot;Accept: application/json\r\n&quot;</span>)</span><br><span class="line">msg.WriteString(<span class="string">&quot;Connection: close\r\n&quot;</span>)</span><br><span class="line">msg.WriteString(<span class="string">&quot;\r\n&quot;</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment">// 发送内容</span></span><br><span class="line">_, err = conn.Write([]<span class="keyword">byte</span>(msg.String()))</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">  fmt.Println(<span class="string">&quot;Send msg err: &quot;</span>, err)</span><br><span class="line">  <span class="keyword">return</span> </span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>同理，响应也是，这里不再赘述，读者可自行编写代码，也可以使用 <code>wireshark</code> 抓包测试。</p>
+<h2 id="正向代理实现"><a href="#正向代理实现" class="headerlink" title="正向代理实现"></a>正向代理实现</h2><p>上面提到过，在正向代理下，我们会首先连接到代理服务器，然后代理服务会到服务器上请求对应的资源，那么我们身为代理服务器，如何知道客户端需要请求什么资源呢？</p>
+<p>这到不同担心，客户端连接代理的时候，是有一定的规范的，不是说随便连，对于 <code>HTTP</code> 协议来说，请求代理服务器和请求普通的服务器大致相同，但是请求的路径一般会设置为绝对路径，比如为 <code>GET http://httpbin.org/ HTTP/1.1</code>，而不是 <code>GET / HTTP/1.1</code>，对于 <code>HTTPS</code> 来说，首先会通过 <code>CONNECT</code> 连接到代理服务器，接受到 <code>200</code> 响应之后才会发送实际的加密数据。</p>
+<p>首先我们来考虑一下 <code>HTTP</code> 吧，下面是连接到服务器上的请求：</p>
+<img src="proxy_1.png">
+
+<p>我们需要做的是获取到对应的服务器地址，也就是 <code>Host</code> 字段，将头部数据解析完成之后，获取该字段即可。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> Request <span class="keyword">struct</span> &#123;</span><br><span class="line">	Method  <span class="keyword">string</span></span><br><span class="line">	Path    <span class="keyword">string</span></span><br><span class="line">	Version <span class="keyword">string</span></span><br><span class="line">	Headers http.Header</span><br><span class="line">	Body    []<span class="keyword">byte</span></span><br><span class="line">	raw     []<span class="keyword">byte</span>  <span class="comment">// 原始请求</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(r Request)</span> <span class="title">Host</span><span class="params">()</span> <span class="params">(<span class="keyword">string</span>, <span class="keyword">bool</span>)</span></span> &#123;</span><br><span class="line">	<span class="keyword">if</span> r.Headers.Get(<span class="string">&quot;Host&quot;</span>) != <span class="string">&quot;&quot;</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> r.Headers.Get(<span class="string">&quot;Host&quot;</span>), <span class="literal">true</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> <span class="string">&quot;&quot;</span>, <span class="literal">false</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">ParseRequest</span><span class="params">(conn io.Reader)</span> <span class="params">(*Request, error)</span></span> &#123;</span><br><span class="line">	br := bufio.NewReader(conn)</span><br><span class="line">	<span class="comment">// ...省略部分代码...</span></span><br><span class="line"></span><br><span class="line">  <span class="comment">// 解析请求头部</span></span><br><span class="line">	<span class="keyword">for</span> &#123;</span><br><span class="line">		line, err := br.ReadBytes(<span class="string">&#x27;\n&#x27;</span>)</span><br><span class="line">		<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">			<span class="keyword">if</span> err == io.EOF &#123;</span><br><span class="line">				<span class="keyword">break</span></span><br><span class="line">			&#125;</span><br><span class="line">		&#125;</span><br><span class="line">		req.raw = <span class="built_in">append</span>(req.raw, line...)</span><br><span class="line">		line = bytes.TrimSpace(line)</span><br><span class="line">		<span class="comment">// \r\n</span></span><br><span class="line">		<span class="keyword">if</span> <span class="built_in">len</span>(line) == <span class="number">0</span> &#123;</span><br><span class="line">			<span class="keyword">break</span></span><br><span class="line">		&#125;</span><br><span class="line">		colon := bytes.IndexByte(line, <span class="string">&#x27;:&#x27;</span>)</span><br><span class="line">    <span class="comment">// Bytes2Str 将 []byte 转换成 string</span></span><br><span class="line">		req.Headers.Add(byteconv.Bytes2Str(bytes.TrimSpace(line[:colon])), byteconv.Bytes2Str(bytes.TrimSpace(line[colon+<span class="number">1</span>:])))</span><br><span class="line">	&#125;</span><br><span class="line">	</span><br><span class="line">    <span class="comment">// ...省略部分代码...</span></span><br><span class="line">    <span class="keyword">return</span> req, <span class="literal">nil</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>获取到服务端的地址之后，建立 <code>TCP</code> 连接，然后将请求发送过去</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">if</span> !strings.Contains(host, <span class="string">&quot;:&quot;</span>) &#123;</span><br><span class="line">	host += <span class="string">&quot;:80&quot;</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">server, err := net.Dial(<span class="string">&quot;tcp&quot;</span>, host)</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">    conn.Close()</span><br><span class="line">    log.Println(<span class="string">&quot;Dial server failed: &quot;</span>, err)</span><br><span class="line">    <span class="keyword">return</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">_, err = server.Write(request.Raw())</span><br><span class="line"><span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">    log.Println(<span class="string">&quot;Write server failed: &quot;</span>, err)</span><br><span class="line">    conn.Close()</span><br><span class="line">    server.Close()</span><br><span class="line">    <span class="keyword">return</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>最后将响应返回给客户端，直接调用 <code>io.Copy</code> 即可</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">tunnel(conn, server)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">tunnel</span><span class="params">(client net.Conn, server net.Conn)</span></span> &#123;</span><br><span class="line">	<span class="keyword">go</span> io.Copy(server, client)</span><br><span class="line">	<span class="keyword">go</span> io.Copy(client, server)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>如果说，我们想对响应进行过滤或者其他的操作，我们应该进行解析，解析的过程和请求类似，如果需要过滤掉，则不将结果返回，返回一些错误码，比如 403 即可。</p>
+</blockquote>
+<p>对于 <code>HTTPS</code> 协议来说其实也是差不多的，但是由于 HTTPS 采用 <code>SSL/TLS</code> 对数据进行加密，所以我们无法对其实际的请求进行解析，不过对 <code>CONNECT</code> 请求进行解析已经可以满足我们的需求了。</p>
+<p>接受到 <code>CONNECT</code> 请求之后，我们首先应该返回 <code>2xx</code> 表示连接成功，然后将请求的数据原封不动的发送给服务端，服务端返回的也原封不动的返回给客户端，我们对其中的数据不关心，即使关心也解密不了。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">if</span> request.Method ==  <span class="string">&quot;CONNECT&quot;</span>&#123;</span><br><span class="line">    conn.Write([]<span class="keyword">byte</span>(<span class="string">&quot;HTTP/1.1 200 OK\r\n\r\n&quot;</span>))</span><br><span class="line">    tunnel(conn, server)</span><br><span class="line">    <span class="keyword">return</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+<h2 id="进行测试"><a href="#进行测试" class="headerlink" title="进行测试"></a>进行测试</h2><p>下载插件 <code>Proxy SwitchyOmega</code>，如果你使用 <code>Edge</code>，见 <a href="https://microsoftedge.microsoft.com/addons/detail/proxy-switchyomega/fdbloeknjpnloaggplaobopplkdhnikc">这里</a>，如果你使用Google，见 <a href="https://chrome.google.com/webstore/detail/padekgcemlokbadohgkifijomclgjgif">这里</a></p>
+<p>打开插件进行配置，如下<br><img src="SwitchyOmega.png" width=500></p>
+<p>访问一个网址，比如<code>http://httpbin.org</code>，如果可以访问，那么说明代理服务器生效~</p>
+<p>完整代码见 <a href="https://github.com/junhaideng/go-http-proxy">GitHub</a></p>
+]]></content>
+      <categories>
+        <category>networking</category>
+      </categories>
+      <tags>
+        <tag>HTTP</tag>
+        <tag>proxy</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>如何使用 GitHub Actions 制作定时任务</title>
+    <url>/2021/11/22/git/scheduler/</url>
+    <content><![CDATA[<h2 id="介绍"><a href="#介绍" class="headerlink" title="介绍"></a>介绍</h2><p><code>GitHub Actions</code> 是官方提供的一套 <code>DevOps</code> 工具，可以完成软件开发周期的任务，比如可以实现自动化测试，部署等，简单来理解，我们认为它给我们提供了一个服务器，在上面可以执行一系列的指令(不过会有一些限制)，这就意味着我们可以用来<del>白嫖</del>，比如做定时任务，又不需要自己买服务器。</p>
+<p>下面介绍一下如果使用 <code>GitHub Actions</code> 制作一个定时任务，每天定时发布天气情况，当然你学会了之后可以用于签到啊🤭。</p>
+<span id="more"></span>
+
+<h2 id="前置准备"><a href="#前置准备" class="headerlink" title="前置准备"></a>前置准备</h2><p>很简单，只要创建一个 <code>GitHub</code> 仓库，不妨叫做 <code>scheduler</code>， 然后将仓库 <code>git clone</code> 到本地编辑器进行编写即可。</p>
+<h2 id="逻辑代码实现"><a href="#逻辑代码实现" class="headerlink" title="逻辑代码实现"></a>逻辑代码实现</h2><p>这里我们做一个<strong>天气预报</strong>，每天都可以定时发送天气预报到我们的邮件里面去。</p>
+<h3 id="首先第一步，去哪里获取到天气的信息？"><a href="#首先第一步，去哪里获取到天气的信息？" class="headerlink" title="首先第一步，去哪里获取到天气的信息？"></a>首先第一步，去哪里获取到天气的信息？</h3><p>网上有很多天气查询的网站，部分网站提供了对应的 <code>API</code> 接口，但是需要密钥或者限制了调用次数，对于简单的使用来说，比较适合，这里采用爬虫技术从<a href="http://weathernew.pae.baidu.com/weathernew/pc?query=%E6%88%90%E9%83%BD&srcid=4982">百度天气</a>上获取数据，不用受限于密钥和调用次数。</p>
+<h3 id="网站资源找到了，如何拉取数据下来？"><a href="#网站资源找到了，如何拉取数据下来？" class="headerlink" title="网站资源找到了，如何拉取数据下来？"></a>网站资源找到了，如何拉取数据下来？</h3><p>一般来说，写爬虫的时候想要获取数据的时候，我们会使用两种方式进行查看：</p>
+<ul>
+<li>右键查看网页源代码</li>
+<li>分析网络请求，F12 即可</li>
+</ul>
+<p>这里使用第一种方法就可以获取到了，如下为网页源代码，直接包含天气数据：</p>
+<img src="source-code.png"  style="width:500px"/>
+
+<p>然后我们可以使用正则表达式，将对应的数据部分获取下来，并且解析为 <code>JSON</code> 数据，大概代码如下：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">var</span> dataPattern = regexp.MustCompile(<span class="string">&quot;window.tplData = (.*?);&lt;/script&gt;&quot;</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment">// 省略天气数据定义....</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">getWeather</span><span class="params">(city <span class="keyword">string</span>)</span> <span class="params">(*WeatherData, error)</span></span> &#123;</span><br><span class="line">	<span class="comment">// 发送网络请求，获取源代码</span></span><br><span class="line">	resp, err := http.Get(fmt.Sprintf(<span class="string">&quot;http://weathernew.pae.baidu.com/weathernew/pc?query=%s&amp;srcid=4982&quot;</span>, city))</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">defer</span> resp.Body.Close()</span><br><span class="line">	<span class="comment">// 读取网页源码</span></span><br><span class="line">	data, err := io.ReadAll(resp.Body)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 进行匹配，获取数据</span></span><br><span class="line">	match := dataPattern.FindSubmatch(data)</span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">len</span>(match) == <span class="number">0</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, errors.New(<span class="string">&quot;Do not find weather data&quot;</span>)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 反序列化数据</span></span><br><span class="line">	<span class="keyword">var</span> res WeatherData</span><br><span class="line">	err = json.Unmarshal(match[<span class="number">1</span>], &amp;res)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> &amp;res, err</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>解析之后，我们按照自己的想法拼接信息，然后将数据发送过去即可，这里采用邮件发送，代码如下，当然你可以使用包装更好的一些 <code>package</code>，这里直接使用标准库。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">sendMail</span><span class="params">(to, content <span class="keyword">string</span>)</span> <span class="title">error</span></span> &#123;</span><br><span class="line">	<span class="comment">// 这里采用的是 126 邮箱，不同的邮箱 host 设置不同</span></span><br><span class="line">	auth := smtp.PlainAuth(<span class="string">&quot;&quot;</span>, emailUsername, emailPassword, <span class="string">&quot;smtp.126.com&quot;</span>)</span><br><span class="line">	msg := fmt.Sprintf(<span class="string">&quot;From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: %s; charset=UTF-8\r\n\r\n %s&quot;</span>,</span><br><span class="line">		emailUsername,</span><br><span class="line">		to,</span><br><span class="line">		<span class="string">&quot;每日天气&quot;</span>,</span><br><span class="line">		<span class="string">&quot;text/plain&quot;</span>,</span><br><span class="line">		content,</span><br><span class="line">	)</span><br><span class="line">	err := smtp.SendMail(<span class="string">&quot;smtp.126.com:25&quot;</span>, auth, emailUsername, []<span class="keyword">string</span>&#123;to&#125;, []<span class="keyword">byte</span>(msg))</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Println(<span class="string">&quot;send email failed: &quot;</span>, err)</span><br><span class="line">		<span class="keyword">return</span> err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> <span class="literal">nil</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 简单的示例，可以进行加工</span></span><br><span class="line"><span class="keyword">const</span> tpl = <span class="string">`&#123;&#123;.city&#125;&#125;天气情况：</span></span><br><span class="line"><span class="string"></span></span><br><span class="line"><span class="string">今天是&#123;&#123;.date&#125;&#125;，农历&#123;&#123;.lunar&#125;&#125;，天气&#123;&#123;.weather&#125;&#125;，伴有&#123;&#123;.wind_direction&#125;&#125;，预测今日&#123;&#123;.precipitation_type&#125;&#125;</span></span><br><span class="line"><span class="string">紫外线&#123;&#123;.uv&#125;&#125;, &#123;&#123;.uv_info&#125;&#125;，pm2.5指标为&#123;&#123;.pm25&#125;&#125;, 属于&#123;&#123;.pm25_level&#125;&#125;</span></span><br><span class="line"><span class="string">`</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="comment">// ...</span></span><br><span class="line"></span><br><span class="line">	t, err := template.New(<span class="string">&quot;weather&quot;</span>).Parse(tpl)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Println(<span class="string">&quot;Parse template failed: &quot;</span>, err)</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">var</span> buf = &amp;strings.Builder&#123;&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 将数据添加到模板中</span></span><br><span class="line">	err = t.Execute(buf, <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">string</span>&#123;</span><br><span class="line">		<span class="string">&quot;city&quot;</span>:               city,</span><br><span class="line">		<span class="string">&quot;date&quot;</span>:               data.Base.Date,</span><br><span class="line">		<span class="string">&quot;lunar&quot;</span>:              data.Base.Lunar,</span><br><span class="line">		<span class="string">&quot;weather&quot;</span>:            data.Weather[<span class="string">&quot;weather&quot;</span>],</span><br><span class="line">		<span class="string">&quot;wind_direction&quot;</span>:     data.Weather[<span class="string">&quot;wind_direction&quot;</span>],</span><br><span class="line">		<span class="string">&quot;uv&quot;</span>:                 data.Weather[<span class="string">&quot;uv&quot;</span>],</span><br><span class="line">		<span class="string">&quot;uv_info&quot;</span>:            data.Weather[<span class="string">&quot;uv_info&quot;</span>],</span><br><span class="line">		<span class="string">&quot;precipitation_type&quot;</span>: data.Weather[<span class="string">&quot;precipitation_type&quot;</span>],</span><br><span class="line">		<span class="string">&quot;pm25&quot;</span>:               data.PSPm25.PSPm25,</span><br><span class="line">		<span class="string">&quot;pm25_level&quot;</span>:         data.PSPm25.Level,</span><br><span class="line">	&#125;)</span><br><span class="line"></span><br><span class="line">	sendMail(to, buf.String())</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
+<h2 id="定时任务设置"><a href="#定时任务设置" class="headerlink" title="定时任务设置"></a>定时任务设置</h2><p>定时任务是这次的重点，设置起来其实也挺简单的。</p>
+<p>首先我们需要创建文件夹 <code>.github/workflows</code>，文件夹下面可以创建工作流程文件，只要是 <code>.yml</code> 文件都会作为一个单独的工作流程文件，每一个文件都会在事件触发的时候执行，比如在提交代码，提PR的时候等。</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 比如仅在push的时候执行</span></span><br><span class="line"><span class="attr">on:</span> <span class="string">push</span></span><br><span class="line"><span class="comment"># push 或者 pull_request 的时候执行</span></span><br><span class="line"><span class="attr">on:</span> [<span class="string">push</span>, <span class="string">pull_request</span>]</span><br><span class="line"><span class="comment"># 同时也可以指定分支</span></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">push:</span></span><br><span class="line">    <span class="attr">branches:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">main</span></span><br></pre></td></tr></table></figure>
+
+<p>更加具体的语法可以参加<a href="https://docs.github.com/en/actions">官方文档</a>介绍，这里不再赘述，如果我们想要定义一个定时任务，那么触发事件可以类比下面的方式</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">schedule:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span>  <span class="string">&#x27;30 5,17 * * *&#x27;</span> <span class="comment"># 每天5:30, 17:30执行，时间为国际标准时间，非北京时间！！</span></span><br></pre></td></tr></table></figure>
+
+<p>其中 <code>cron</code> 语法和 <code>Linux</code> 中的一致，如下</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">┌───────────── 分钟 (0 - 59)</span><br><span class="line">│ ┌───────────── 小时 (0 - 23)</span><br><span class="line">│ │ ┌───────────── 日期 (1 - 31)</span><br><span class="line">│ │ │ ┌───────────── 月 (1 - 12 or JAN-DEC)</span><br><span class="line">│ │ │ │ ┌───────────── 星期 (0 - 6 or SUN-SAT)</span><br><span class="line">│ │ │ │ │</span><br><span class="line">│ │ │ │ │</span><br><span class="line">│ │ │ │ │</span><br><span class="line">* * * * *</span><br></pre></td></tr></table></figure>
+
+<p>如果你不清楚输出的表示什么时间，那么你可以在 <a href="https://crontab.guru/">crontab guru</a> 中进行测试。而对于我们的天气预报来说，我们的工作流程文件可以定义为：</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">name:</span> <span class="string">weather-report</span> <span class="comment"># 工作流程名称，会在网页中进行显示</span></span><br><span class="line"></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">push:</span>  <span class="comment"># 为了调试方便，修改代码之后push上去即可以看到效果</span></span><br><span class="line">    <span class="attr">paths:</span> <span class="comment"># 指定只有哪些文件修改了才会触发该工作流程</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">weather-report/**</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">.github/workflows/weather-report.yml</span></span><br><span class="line">  <span class="attr">schedule:</span> <span class="comment"># 定时任务</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span> <span class="string">&quot;0 0 * * *&quot;</span> <span class="comment"># 每天 0 点跑 =&gt; 东八区 8点</span></span><br><span class="line"></span><br><span class="line"><span class="attr">jobs:</span></span><br><span class="line">  <span class="attr">weather-report:</span></span><br><span class="line">    <span class="attr">runs-on:</span> <span class="string">&quot;ubuntu-latest&quot;</span> <span class="comment"># 在什么机器上跑</span></span><br><span class="line">    <span class="attr">env:</span> <span class="comment"># 设置的一些 secret，在 settings 中可以设置</span></span><br><span class="line">      <span class="attr">EMAIL_USERNAME:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.EMAIL_USERNAME</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">EMAIL_PASSWORD:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.EMAIL_PASSWORD</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">TO:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.TO</span> <span class="string">&#125;&#125;</span></span><br><span class="line">    <span class="attr">steps:</span> <span class="comment"># 指定的步骤</span></span><br><span class="line">      <span class="bullet">-</span> <span class="attr">uses:</span> <span class="string">actions/checkout@v2</span> </span><br><span class="line">      <span class="bullet">-</span> <span class="attr">uses:</span> <span class="string">actions/setup-go@v2</span>  <span class="comment"># 使用 golang </span></span><br><span class="line">        <span class="attr">with:</span></span><br><span class="line">          <span class="attr">go-version:</span> <span class="string">&quot;^1.17&quot;</span> <span class="comment"># 版本号</span></span><br><span class="line">      <span class="bullet">-</span> <span class="attr">run:</span> <span class="string">go</span> <span class="string">run</span> <span class="string">weather-report/main.go</span> <span class="string">-eu</span> <span class="string">$EMAIL_USERNAME</span> <span class="string">-ep</span> <span class="string">$EMAIL_PASSWORD</span> <span class="string">-to</span> <span class="string">$TO</span>  <span class="comment"># 指定的命令</span></span><br></pre></td></tr></table></figure>
+
+<p>所有代码编写完成之后，push 到仓库中，便可以查看到正在执行的行为。</p>
+<img width=500 src="actions.png" >
+
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>核心步骤其实很简单：</p>
+<ul>
+<li>创建仓库，<code>clone</code> 下来</li>
+<li>进行逻辑代码编写</li>
+<li>创建 <code>.github/workflows</code> 目录，并编写工作流程文件</li>
+<li><code>push</code> 代码上去，事件触发时执行</li>
+</ul>
+<p>工作流程文件的编写并不是很复杂，如果我们会 <code>docker-compose.yml</code> 的编写，很容易就掌握了基本内容，其他需要的语法到时候翻翻官方文档即可，而且官方提供了大量的模板供使用。</p>
+<p>上述的这个定时任务并没有什么很大的使用之处，毕竟人手一台手机，天气点一点就是知道的事了，比这个方便美观多了，其实更重要是学习怎么利用爬虫去获取简单的数据，以及 <code>GitHub Actions</code> 的使用，如果把签到作为定时任务，那么定会得到极大的解放🧐。</p>
+<p>不过，<code>GitHub Actions</code> 的使用当然不仅限于此，自动化测试，自动化部署都可以通过它实现~</p>
+]]></content>
+      <categories>
+        <category>GitHub</category>
+      </categories>
+      <tags>
+        <tag>GitHub Actions</tag>
+        <tag>Scheduler</tag>
+      </tags>
+  </entry>
+</search>
