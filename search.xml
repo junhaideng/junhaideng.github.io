@@ -1075,4 +1075,253 @@
         <tag>source code</tag>
       </tags>
   </entry>
+  <entry>
+    <title>Docker 基本使用</title>
+    <url>/2021/07/10/docker/basic/</url>
+    <content><![CDATA[<p><code>Docker</code> 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。</p>
+<p>下面介绍一下基本使用：</p>
+<h2 id="从一个Hello-world开始"><a href="#从一个Hello-world开始" class="headerlink" title="从一个Hello world开始"></a>从一个Hello world开始</h2><p>Docker 可以允许你在容器中运行应用程序，使用 <code>docker run</code> 可以在容器中运行一个应用程序。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run ubuntu:18.04 /bin/<span class="built_in">echo</span> <span class="string">&quot;Hello world&quot;</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>run</code>: 表示运行一个容器</li>
+<li><code>ubuntu:18.04</code>: 指定要运行的镜像，Docker 首先在本地主机上查找对应的镜像是否存在，如果不存在的话，那么会从远程镜像仓库 <code>Docker Hub</code> 中下载公共镜像，如果没有指定后面的 TAG，那么默认情况下使用的是 latest</li>
+<li><code>/bin/echo &quot;Hello world&quot;</code>: 在启动的容器中执行的命令</li>
+</ul>
+<span id="more"></span>
+
+<p>运行完上面的命令之后，我们会下载一个 <code>ubuntu</code> 镜像，并且创建一个容器，使用下面的命令可以查看所有的镜像文件</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
+
+<p>如果我们不需要这些容器了，我们可以使用下面命令进行删除</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># container 指的是容器的ID或者NAME，可以一次性删除多个</span></span><br><span class="line">docker rm container [container...]</span><br></pre></td></tr></table></figure>
+
+<h3 id="运行交互式容器"><a href="#运行交互式容器" class="headerlink" title="运行交互式容器"></a>运行交互式容器</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -i -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># -i -t 可以合并为-it</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-t</code>: 在新容器中指令一个伪终端或终端</li>
+<li><code>-i:</code> 允许对容器中的标准输入(stdin)进行交互</li>
+</ul>
+<p>输入<code>exit</code>可以退出当前容器</p>
+<h3 id="运行后台模式容器"><a href="#运行后台模式容器" class="headerlink" title="运行后台模式容器"></a>运行后台模式容器</h3><p>使用下面的命令可以创建一个以进程方式运行的容器</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d ubuntu:18.04 /bin/sh -c <span class="string">&quot;while true; do echo hello world; sleep 1; done&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>运行完上面的命令之后会输出一串字符串，表示的是这个 <code>容器ID</code></p>
+<h2 id="容器使用"><a href="#容器使用" class="headerlink" title="容器使用"></a>容器使用</h2><h4 id="获取镜像"><a href="#获取镜像" class="headerlink" title="获取镜像"></a>获取镜像</h4><p>如果本地没有镜像，那么可以使用下面的命令获取 <code>ubuntu</code> 镜像</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker pull ubuntu</span><br></pre></td></tr></table></figure>
+
+<h4 id="启动容器"><a href="#启动容器" class="headerlink" title="启动容器"></a>启动容器</h4><p>使用下面命令启动一个容器，并且以命令行模式进入该容器</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -it ubuntu /bin/bash</span><br><span class="line"><span class="comment"># 默认使用的就是 /bin/bash</span></span><br></pre></td></tr></table></figure>
+
+<p>使用 <code>exit</code> 可退出终端</p>
+<h4 id="后台运行"><a href="#后台运行" class="headerlink" title="后台运行"></a>后台运行</h4><p>在大部分的场景下，我们希望 <code>docker</code> 的服务是在后台运行的，使用 <code>-d</code> 参数指定容器以 <code>守护进程</code> 的形式运行</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name ubuntu-test ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<h4 id="启动、停止容器"><a href="#启动、停止容器" class="headerlink" title="启动、停止容器"></a>启动、停止容器</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker stop container</span><br><span class="line"><span class="comment"># 启动一个已经停止的容器</span></span><br><span class="line">docker start container</span><br><span class="line"><span class="comment"># 重启一个容器</span></span><br><span class="line">docker restart container</span><br></pre></td></tr></table></figure>
+
+<h4 id="进入容器"><a href="#进入容器" class="headerlink" title="进入容器"></a>进入容器</h4><p>在使用 <code>-d</code> 参数时，容器启动会进入后台，此时如果想要进入容器，可以使用下面的指令进入</p>
+<ul>
+<li><code>docker attach container</code></li>
+<li><code>docker exec container</code><blockquote>
+<p>推荐使用 docker exec，因为使用这个方式退出终端之后不会导致容器的停止</p>
+</blockquote>
+</li>
+</ul>
+<p>使用 <code>docker exec</code> 的时候需要指定运行的命令，比如</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker <span class="built_in">exec</span> -it 243c32535da7 /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>而使用 <code>docker attach</code> 的时候会直接进行上一次的命令</p>
+<h4 id="删除容器"><a href="#删除容器" class="headerlink" title="删除容器"></a>删除容器</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker rm container</span><br></pre></td></tr></table></figure>
+
+<p>删除容器的时候必须是停止状态</p>
+<h4 id="查看网络端口映射"><a href="#查看网络端口映射" class="headerlink" title="查看网络端口映射"></a>查看网络端口映射</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># PORTS信息中有</span></span><br><span class="line">docker ps</span><br><span class="line"></span><br><span class="line"><span class="comment"># 查看指定容器的端口映射</span></span><br><span class="line">docker port container</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看容器日志"><a href="#查看容器日志" class="headerlink" title="查看容器日志"></a>查看容器日志</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker logs container</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看容器的进程"><a href="#查看容器的进程" class="headerlink" title="查看容器的进程"></a>查看容器的进程</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker top container</span><br></pre></td></tr></table></figure>
+
+<h4 id="检查容器"><a href="#检查容器" class="headerlink" title="检查容器"></a>检查容器</h4><p>输出容器的一系列信息</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker inspect container</span><br></pre></td></tr></table></figure>
+
+<h3 id="Docker-镜像使用"><a href="#Docker-镜像使用" class="headerlink" title="Docker 镜像使用"></a>Docker 镜像使用</h3><p>当运行容器的时候，如果使用的容器本地不存在，那么 <code>docker</code> 会自动从镜像仓库中下载，默认是 <code>Docker Hub</code> 公共镜像源</p>
+<h4 id="列出所有镜像列表"><a href="#列出所有镜像列表" class="headerlink" title="列出所有镜像列表"></a>列出所有镜像列表</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
+
+<h4 id="获取一个新的镜像"><a href="#获取一个新的镜像" class="headerlink" title="获取一个新的镜像"></a>获取一个新的镜像</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker pull ubuntu:18.04</span><br></pre></td></tr></table></figure>
+
+<h4 id="查找镜像"><a href="#查找镜像" class="headerlink" title="查找镜像"></a>查找镜像</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker search xxx</span><br></pre></td></tr></table></figure>
+
+<h4 id="删除镜像"><a href="#删除镜像" class="headerlink" title="删除镜像"></a>删除镜像</h4><p>镜像的删除使用 docker rmi 命令</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker rmi imageName</span><br></pre></td></tr></table></figure>
+
+<h4 id="设置镜像标签"><a href="#设置镜像标签" class="headerlink" title="设置镜像标签"></a>设置镜像标签</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker tag container xxx:xxx</span><br></pre></td></tr></table></figure>
+
+<h3 id="Docker-容器网络连接"><a href="#Docker-容器网络连接" class="headerlink" title="Docker 容器网络连接"></a>Docker 容器网络连接</h3><p>容器中可以运行一些网络应用，要想让外部也可以访问里面的这些应用，那么可以通过 <code>-P</code> 或者 <code>-p</code> 参数来指定端口映射</p>
+<h4 id="网络端口映射"><a href="#网络端口映射" class="headerlink" title="网络端口映射"></a>网络端口映射</h4><p>比如说运行一个 python 应用</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d -P webapp python app.py</span><br><span class="line"><span class="comment"># 将容器内容的5000(2)端口映射到宿主机的5000(1)端口</span></span><br><span class="line">docker run -d -p 5000:5000 webapp python app.py</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-P</code>: 容器里面的端口随机映射到主机端口</li>
+<li><code>-p</code>: 容器内部端口绑定到指定的主机端口</li>
+<li>端口进行映射之后，我们可以使用 <code>docker ps</code> 或者 <code>docker port container</code> 进行查看对应的端口映射关系</li>
+</ul>
+<p>默认情况下绑定的都是 <code>tcp</code> 端口，如果要绑定 <code>udp</code> 端口，可以再端口后面加 <code>/udp</code></p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d -p 127.0.0.1:5000:5000/udp webapp python app.py</span><br></pre></td></tr></table></figure>
+
+<h4 id="Docker-容器互联"><a href="#Docker-容器互联" class="headerlink" title="Docker 容器互联"></a>Docker 容器互联</h4><p>端口映射不是唯一的将 <code>docker</code> 连接到另一个容器的方法<br><code>docker</code> 有一个连接系统允许将多个容器连接在一起，共享连接信息<br><code>docker</code> 连接会创建一个父子关系，其中父容器可以看到子容器的信息</p>
+<h5 id="端口命名"><a href="#端口命名" class="headerlink" title="端口命名"></a>端口命名</h5><p>当我们创建一个容器的时候，docker 会自动对它进行命名，我们可以使用 <code>--name</code> 参数来自定义命名</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d --name ubuntu -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># 下面方法可以修改一个container的name</span></span><br><span class="line">docker rename container NEW_NAME</span><br></pre></td></tr></table></figure>
+
+<h4 id="新建网络"><a href="#新建网络" class="headerlink" title="新建网络"></a>新建网络</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker network</span><br></pre></td></tr></table></figure>
+
+<p>eg:</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker network create -d bridge test-net</span><br><span class="line"><span class="comment"># -d 表示新建网络内省，有bridge, overlay</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="连接容器"><a href="#连接容器" class="headerlink" title="连接容器"></a>连接容器</h4><p>运行一个容器并连接到新建的网络中</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name test1 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>然后在打开一个新的终端运行一个容器并加入到 test-net 网络中</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name test2 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>然后可以在容器之间进行 ping</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">ping test1  <span class="comment"># test2内</span></span><br><span class="line">ping test2  <span class="comment"># test1内</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Dockerfile"><a href="#Dockerfile" class="headerlink" title="Dockerfile"></a>Dockerfile</h2><p>Dockerfile 可以用来构建一个镜像，文本内容包含了一条条构建镜像所需要的指令和说明</p>
+<h3 id="使用-Dockerfile-定制镜像"><a href="#使用-Dockerfile-定制镜像" class="headerlink" title="使用 Dockerfile 定制镜像"></a>使用 Dockerfile 定制镜像</h3><figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">FROM</span> node</span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> . /server</span></span><br><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> /server</span></span><br><span class="line"><span class="keyword">RUN</span><span class="bash"> npm install --production</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">EXPOSE</span> <span class="number">3001</span></span><br><span class="line"><span class="keyword">ENTRYPOINT</span><span class="bash"> [ <span class="string">&quot;npm&quot;</span>, <span class="string">&quot;run&quot;</span>, <span class="string">&quot;start&quot;</span>]</span></span><br></pre></td></tr></table></figure>
+
+<p><code>FROM</code> 指定使用哪一个镜像源<br><code>RUN</code> 指定要执行的命令<br><code>COPY</code> 执行相应的复制操作</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker build -t centos:6.7 DockerfilePath</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-t</code>: 指定创建的目标镜像名</li>
+<li><code>DockerfilePath</code>: 指定需要使用的 <code>Dockerfile</code> 文件，也可以指定所在目录，但是这样目录中的构建文件名必须是 <code>Dockerfile</code></li>
+</ul>
+<h3 id="构建镜像"><a href="#构建镜像" class="headerlink" title="构建镜像"></a>构建镜像</h3><p>在 Dockerfile 文件的存放目录下，执行构建动作</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker build -t nginx:v3 .</span><br></pre></td></tr></table></figure>
+
+<p><code>.</code>, 上下文路径， 可以用 Dockerfile 的路径来代替，也可以使用目录，只不过构建文件名必须为 Dockerfile</p>
+<h3 id="指令详解"><a href="#指令详解" class="headerlink" title="指令详解"></a>指令详解</h3><h4 id="COPY"><a href="#COPY" class="headerlink" title="COPY"></a>COPY</h4><p>复制指令，从上下文目录中复制文件或者目录到容器里指定路径。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="bash"> [--chown=&lt;user&gt;:&lt;group&gt;] &lt;源路径1&gt;...  &lt;目标路径&gt;</span></span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> [--chown=&lt;user&gt;:&lt;group&gt;] [<span class="string">&quot;&lt;源路径1&gt;&quot;</span>,...  <span class="string">&quot;&lt;目标路径&gt;&quot;</span>]</span></span><br></pre></td></tr></table></figure>
+
+<p><code>--chown=</code>：可选参数，用户改变复制到容器内文件的拥有者和属组。</p>
+<p><code>源路径</code>：源文件或者源目录，这里可以是通配符表达式，其通配符规则要满足 Go 的 filepath.Match 规则。例如：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="bash"> hom* /mydir/</span></span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> hom?.txt /mydir/</span></span><br></pre></td></tr></table></figure>
+
+<p><code>&lt;目标路径&gt;</code>：容器内的指定路径，该路径不用事先建好，路径不存在的话，会自动创建。</p>
+<h4 id="ADD"><a href="#ADD" class="headerlink" title="ADD"></a>ADD</h4><p>ADD 指令和 COPY 的使用格式一致（同样需求下，官方推荐使用 COPY）。功能也类似，不同之处如下：</p>
+<ul>
+<li>ADD 的优点：在执行 &lt;源文件&gt; 为 tar 压缩文件的话，压缩格式为 gzip, bzip2 以及 xz 的情况下，会自动复制并解压到 &lt;目标路径&gt;。</li>
+<li>ADD 的缺点：在不解压的前提下，无法复制 tar 压缩文件。会令镜像构建缓存失效，从而可能会令镜像构建变得比较缓慢。具体是否使用，可以根据是否需要自动解压来决定。</li>
+</ul>
+<h4 id="CMD"><a href="#CMD" class="headerlink" title="CMD"></a>CMD</h4><p>类似于 RUN 指令，用于运行程序，但二者运行的时间点不同:</p>
+<ul>
+<li>CMD 在 <code>docker run</code> 时运行。</li>
+<li>RUN 是在<code>docker build</code>。</li>
+</ul>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">CMD</span><span class="bash"> &lt;shell 命令&gt;</span></span><br><span class="line"><span class="keyword">CMD</span><span class="bash"> [<span class="string">&quot;&lt;可执行文件或命令&gt;&quot;</span>,<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]</span></span><br><span class="line"><span class="keyword">CMD</span><span class="bash"> [<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]  <span class="comment"># 该写法是为 ENTRYPOINT 指令指定的程序提供默认参数</span></span></span><br></pre></td></tr></table></figure>
+
+<p>推荐使用第二种格式，执行过程比较明确。第一种格式实际上在运行的过程中也会自动转换成第二种格式运行，并且默认可执行文件是 sh。</p>
+<h4 id="ENV"><a href="#ENV" class="headerlink" title="ENV"></a>ENV</h4><p>设置环境变量，定义了环境变量，那么在后续的指令中，就可以使用这个环境变量。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">ENV</span> &lt;key&gt; &lt;value&gt;</span><br><span class="line"><span class="keyword">ENV</span> &lt;key1&gt;=&lt;value1&gt; &lt;key2&gt;=&lt;value2&gt;...</span><br></pre></td></tr></table></figure>
+
+<h4 id="EXPOSE"><a href="#EXPOSE" class="headerlink" title="EXPOSE"></a>EXPOSE</h4><p>声明端口</p>
+<p>作用：</p>
+<ul>
+<li>帮助镜像使用者理解这个镜像服务的守护端口，以方便配置映射。</li>
+<li>在运行时使用随机端口映射时，也就是 docker run -P 时，会自动随机映射 EXPOSE 的端口。</li>
+</ul>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">EXPOSE</span> &lt;端口<span class="number">1</span>&gt; [&lt;端口<span class="number">2</span>&gt;...]</span><br></pre></td></tr></table></figure>
+
+<h4 id="WORKDIR"><a href="#WORKDIR" class="headerlink" title="WORKDIR"></a>WORKDIR</h4><p>指定工作目录。用 <code>WORKDIR</code> 指定的工作目录，会在构建镜像的每一层中都存在。（<code>WORKDIR</code> 指定的工作目录，必须是提前创建好的）。</p>
+<p><code>docker build</code> 构建镜像过程中的，每一个 <code>RUN</code> 命令都是新建的一层。只有通过 <code>WORKDIR</code> 创建的目录才会一直存在。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> &lt;工作目录路径&gt;</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="USER"><a href="#USER" class="headerlink" title="USER"></a>USER</h4><p>用于指定执行后续命令的用户和用户组，这边只是切换后续命令执行的用户（用户和用户组必须提前已经存在）。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">USER</span> &lt;用户名&gt;[:&lt;用户组&gt;]</span><br></pre></td></tr></table></figure>
+
+
+]]></content>
+      <categories>
+        <category>docker</category>
+      </categories>
+      <tags>
+        <tag>docker</tag>
+        <tag>container</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Gin 快速上手</title>
+    <url>/2021/07/22/golang/framework/gin/basic/</url>
+    <content><![CDATA[<p>使用 Go 搭建 Web 后端，最简单的就是使用原生的 <code>net/http</code> 库了，下面是一个简单的例子:</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;fmt&quot;</span></span><br><span class="line">	<span class="string">&quot;net/http&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">greet</span><span class="params">(w http.ResponseWriter, r *http.Request)</span></span> &#123;</span><br><span class="line">	fmt.Fprintln(w, <span class="string">&quot;Hello World!&quot;</span>)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	http.HandleFunc(<span class="string">&quot;/&quot;</span>, greet)</span><br><span class="line">	http.ListenAndServe(<span class="string">&quot;:8080&quot;</span>, <span class="literal">nil</span>)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>运行代码之后，便会在8080端口处监听，接收客户端的请求，然后返回响应，访问 <code>http://localhost:8080</code> 即可以访问到对应的内容。</p>
+<span id="more"></span>
+
+<p>对于简单的服务器，使用标准库提供的函数就已经可以解决了，如果更加复杂一点，使用标准库处理就显得力不从心了，这时候我们可以使用网上提供的框架，比如 <code>Gin</code>。</p>
+<p><code>Gin</code> 使用起来特别方便(真的很方便！)，并且支持中间件，异常处理，路由组等等，下面用代码演示一下如何使用吧。</p>
+<h3 id="快速入门"><a href="#快速入门" class="headerlink" title="快速入门"></a>快速入门</h3><p>首先我们需要下载gin，我们要保证设置了 <code>GO111MODULE=on</code>，然后进行下载</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go mod init gin-demo</span><br><span class="line">go get -u github.com/gin-gonic/gin</span><br></pre></td></tr></table></figure>
+
+<p>下面是一个简单的web服务，我们使用 <code>gin.Default()</code> 创建一个默认的路由引擎,然后使用 <code>GET</code> 方式注册一个路由，负责接受来自客户端的 <code>GET</code> 请求，并且返回一个 <code>JSON</code> 数据给客户端。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> <span class="string">&quot;github.com/gin-gonic/gin&quot;</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	router := gin.Default()</span><br><span class="line">	router.GET(<span class="string">&quot;/ping&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">		c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">			<span class="string">&quot;message&quot;</span>: <span class="string">&quot;pong&quot;</span>,</span><br><span class="line">		&#125;)</span><br><span class="line">	&#125;)</span><br><span class="line">	r.Run() <span class="comment">// 监听并在 0.0.0.0:8080 上启动服务</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+<p>使用curl进行测试结果如下，符合预期</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ curl http://localhost:8080/ping </span><br><span class="line">&#123;<span class="string">&quot;message&quot;</span>:<span class="string">&quot;pong&quot;</span>&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="使用HTTP方法"><a href="#使用HTTP方法" class="headerlink" title="使用HTTP方法"></a>使用HTTP方法</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 使用默认中间件（logger 和 recovery 中间件）创建 gin 路由</span></span><br><span class="line">router := gin.Default()</span><br><span class="line"></span><br><span class="line">router.GET(<span class="string">&quot;/someGet&quot;</span>, getting)</span><br><span class="line">router.POST(<span class="string">&quot;/somePost&quot;</span>, posting)</span><br><span class="line">router.PUT(<span class="string">&quot;/somePut&quot;</span>, putting)</span><br><span class="line">router.DELETE(<span class="string">&quot;/someDelete&quot;</span>, deleting)</span><br><span class="line">router.PATCH(<span class="string">&quot;/somePatch&quot;</span>, patching)</span><br><span class="line">router.HEAD(<span class="string">&quot;/someHead&quot;</span>, head)</span><br><span class="line">router.OPTIONS(<span class="string">&quot;/someOptions&quot;</span>, options)</span><br></pre></td></tr></table></figure>
+
+<h3 id="使用路由组"><a href="#使用路由组" class="headerlink" title="使用路由组"></a>使用路由组</h3><p>使用 <code>Group</code> 方法进行创建，路由组可以使得路由结构更加清晰</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router := gin.Default()</span><br><span class="line"></span><br><span class="line"><span class="comment">// 简单的路由组: v1</span></span><br><span class="line">v1 := router.Group(<span class="string">&quot;/v1&quot;</span>)</span><br><span class="line">&#123;</span><br><span class="line">  v1.POST(<span class="string">&quot;/login&quot;</span>, loginEndpoint)</span><br><span class="line">  v1.POST(<span class="string">&quot;/submit&quot;</span>, submitEndpoint)</span><br><span class="line">  v1.POST(<span class="string">&quot;/read&quot;</span>, readEndpoint)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="返回内容"><a href="#返回内容" class="headerlink" title="返回内容"></a>返回内容</h3><h4 id="返回JSON内容"><a href="#返回JSON内容" class="headerlink" title="返回JSON内容"></a>返回JSON内容</h4><p><code>gin.Context</code> 提供了 <code>JSON</code> 方法， 我们可以直接使用， 第一个参数为返回的状态码，第二个参数为返回的数据，<code>gin.H</code> 其实就是 <code>map[string]interface&#123;&#125;</code> 的简写，最后会被序列化返回给客户端。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router := gin.Default()</span><br><span class="line">router.GET(<span class="string">&quot;/ping&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">    <span class="string">&quot;message&quot;</span>: <span class="string">&quot;pong&quot;</span>,</span><br><span class="line">  &#125;)</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<h4 id="返回HTML内容"><a href="#返回HTML内容" class="headerlink" title="返回HTML内容"></a>返回HTML内容</h4><p>首先需要加载 <code>HTML</code> 模板文件，然后使用 <code>c.HTML</code> 方法将数据注入到指定的模板文件中</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router := gin.Default()</span><br><span class="line">router.LoadHTMLGlob(<span class="string">&quot;templates/**/*&quot;</span>)</span><br><span class="line">router.GET(<span class="string">&quot;/posts/index&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  c.HTML(http.StatusOK, <span class="string">&quot;posts/index.tmpl&quot;</span>, gin.H&#123;</span><br><span class="line">    <span class="string">&quot;title&quot;</span>: <span class="string">&quot;Posts&quot;</span>,</span><br><span class="line">  &#125;)</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<p>模板文件 <code>posts/index.tmpl</code></p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">&#123;&#123; define &quot;posts/index.tmpl&quot; &#125;&#125;</span><br><span class="line">&lt;html&gt;&lt;h1&gt;</span><br><span class="line">	&#123;&#123; .title &#125;&#125;</span><br><span class="line">&lt;/h1&gt;</span><br><span class="line">&lt;p&gt;Using posts/index.tmpl&lt;/p&gt;</span><br><span class="line">&lt;/html&gt;</span><br><span class="line">&#123;&#123; end &#125;&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="返回字符串"><a href="#返回字符串" class="headerlink" title="返回字符串"></a>返回字符串</h4><p>String方法即可</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router.GET(<span class="string">&quot;String&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  c.String(http.StatusOK, <span class="string">&quot;Hello World&quot;</span>)</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<h3 id="获取查询参数"><a href="#获取查询参数" class="headerlink" title="获取查询参数"></a>获取查询参数</h3><p>对于简单的 <code>query</code> 参数，使用 <code>GetQuery</code> 和 <code>DefaultQuery</code> 方法就好了</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router.GET(<span class="string">&quot;/query&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  q, exist := c.GetQuery(<span class="string">&quot;q&quot;</span>)</span><br><span class="line">  <span class="keyword">if</span> exist &#123;</span><br><span class="line">    c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;data&quot;</span>: q,</span><br><span class="line">    &#125;)</span><br><span class="line">  &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">    c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;code&quot;</span>:    <span class="number">400</span>,</span><br><span class="line">      <span class="string">&quot;message&quot;</span>: <span class="string">&quot;q is not exist&quot;</span>,</span><br><span class="line">    &#125;)</span><br><span class="line">  &#125;</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ curl http://localhost:8080/query</span><br><span class="line">&#123;<span class="string">&quot;code&quot;</span>:400,<span class="string">&quot;message&quot;</span>:<span class="string">&quot;q is not exist&quot;</span>&#125;</span><br><span class="line"></span><br><span class="line">$ curl http://localhost:8080/query?q=hello</span><br><span class="line">&#123;<span class="string">&quot;data&quot;</span>:<span class="string">&quot;hello&quot;</span>&#125;</span><br></pre></td></tr></table></figure>
+<p>不过如果需要获取到的 <code>query</code> 参数是数组或者 map，那么就需要使用其他的方式了，比如数组需要使用<code>GetQueryArray</code> or <code>QueryArray</code> 和 <code>GetQueryMap</code> or <code>QueryMap</code>。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">r.GET(<span class="string">&quot;/query_array&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  q, exist := c.GetQueryArray(<span class="string">&quot;q&quot;</span>)</span><br><span class="line">  <span class="keyword">if</span> exist &#123;</span><br><span class="line">    c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;data&quot;</span>: q,</span><br><span class="line">    &#125;)</span><br><span class="line">  &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">    c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;code&quot;</span>:    <span class="number">400</span>,</span><br><span class="line">      <span class="string">&quot;message&quot;</span>: <span class="string">&quot;q is not exist&quot;</span>,</span><br><span class="line">    &#125;)</span><br><span class="line">  &#125;</span><br><span class="line">&#125;)</span><br><span class="line"></span><br><span class="line">r.GET(<span class="string">&quot;/query_map&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  q, exist := c.GetQueryMap(<span class="string">&quot;q&quot;</span>)</span><br><span class="line">  <span class="keyword">if</span> exist &#123;</span><br><span class="line">    c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;data&quot;</span>: q,</span><br><span class="line">    &#125;)</span><br><span class="line">  &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">    c.JSON(<span class="number">200</span>, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;code&quot;</span>:    <span class="number">400</span>,</span><br><span class="line">      <span class="string">&quot;message&quot;</span>: <span class="string">&quot;q is not exist&quot;</span>,</span><br><span class="line">    &#125;)</span><br><span class="line">  &#125;</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ curl <span class="string">&quot;http://localhost:8080/query_array?q=1&amp;q=2&quot;</span></span><br><span class="line">&#123;<span class="string">&quot;data&quot;</span>:[<span class="string">&quot;1&quot;</span>,<span class="string">&quot;2&quot;</span>]&#125;</span><br><span class="line"></span><br><span class="line">$ curl <span class="string">&quot;http://localhost:8080/query_map?q[1]=1&amp;q[2]=2&quot;</span></span><br><span class="line">&#123;<span class="string">&quot;data&quot;</span>:&#123;<span class="string">&quot;1&quot;</span>:<span class="string">&quot;1&quot;</span>,<span class="string">&quot;2&quot;</span>:<span class="string">&quot;2&quot;</span>&#125;&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="获取表单内容"><a href="#获取表单内容" class="headerlink" title="获取表单内容"></a>获取表单内容</h3><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router.POST(<span class="string">&quot;/form&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  name := c.PostForm(<span class="string">&quot;name&quot;</span>)  <span class="comment">// or GetPostForm</span></span><br><span class="line">  list := c.PostFormArray(<span class="string">&quot;list&quot;</span>) <span class="comment">// or GetPostFormArray</span></span><br><span class="line">  m := c.PostFormMap(<span class="string">&quot;map&quot;</span>)  <span class="comment">// or GetPostFormMap</span></span><br><span class="line">  c.JSON(http.StatusOK, gin.H&#123;</span><br><span class="line">    <span class="string">&quot;name&quot;</span>: name,</span><br><span class="line">    <span class="string">&quot;list&quot;</span>: list, </span><br><span class="line">    <span class="string">&quot;map&quot;</span>: m,</span><br><span class="line">  &#125;)</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ curl  --form name=<span class="built_in">test</span> --form list=1 --form list=2 --form map[1]=1 --form map[2]=2 http://localhost:8080/form</span><br><span class="line">&#123;<span class="string">&quot;list&quot;</span>:[<span class="string">&quot;1&quot;</span>,<span class="string">&quot;2&quot;</span>],<span class="string">&quot;map&quot;</span>:&#123;<span class="string">&quot;1&quot;</span>:<span class="string">&quot;1&quot;</span>,<span class="string">&quot;2&quot;</span>:<span class="string">&quot;2&quot;</span>&#125;,<span class="string">&quot;name&quot;</span>:<span class="string">&quot;test&quot;</span>&#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="文件上传"><a href="#文件上传" class="headerlink" title="文件上传"></a>文件上传</h3><h4 id="单文件"><a href="#单文件" class="headerlink" title="单文件"></a>单文件</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router := gin.Default()</span><br><span class="line"><span class="comment">// 为 multipart forms 设置较低的内存限制 (默认是 32 MiB)</span></span><br><span class="line">router.MaxMultipartMemory = <span class="number">8</span> &lt;&lt; <span class="number">20</span>  <span class="comment">// 8 MiB</span></span><br><span class="line">r.POST(<span class="string">&quot;/upload/single&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">    <span class="comment">// 单文件</span></span><br><span class="line">    file, _ := c.FormFile(<span class="string">&quot;file&quot;</span>)</span><br><span class="line">    fmt.Println(file.Filename)</span><br><span class="line">  </span><br><span class="line">    <span class="comment">// 上传文件至指定目录</span></span><br><span class="line">    c.SaveUploadedFile(file, dst)</span><br><span class="line">  </span><br><span class="line">    c.JSON(http.StatusOK, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;code&quot;</span>: <span class="number">0</span>,</span><br><span class="line">      <span class="string">&quot;message&quot;</span>: <span class="string">&quot;upload success&quot;</span>,</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<h4 id="多文件"><a href="#多文件" class="headerlink" title="多文件"></a>多文件</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router.POST(<span class="string">&quot;/upload/multiple&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">		<span class="comment">// Multipart form</span></span><br><span class="line">  form, _ := c.MultipartForm()</span><br><span class="line">  files := form.File[<span class="string">&quot;upload[]&quot;</span>]</span><br><span class="line"></span><br><span class="line">  <span class="keyword">for</span> _, file := <span class="keyword">range</span> files &#123;</span><br><span class="line">    log.Println(file.Filename)</span><br><span class="line"></span><br><span class="line">    <span class="comment">// 上传文件至指定目录</span></span><br><span class="line">    c.SaveUploadedFile(file, dst)</span><br><span class="line">  &#125;</span><br></pre></td></tr></table></figure>
+
+<h3 id="使用中间件"><a href="#使用中间件" class="headerlink" title="使用中间件"></a>使用中间件</h3><p>中间件可以对经过一个路由的请求进行预处理，比如说鉴权，记录日志等等, <code>gin</code> 中创建一个中间件十分简单，我们只需要返回一个 <code>gin.Handler</code> 的类型就好了。下面就创建了一个简单的中间件来计算路由花费的时间</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">Cost</span><span class="params">()</span> <span class="title">gin</span>.<span class="title">HandlerFunc</span></span>&#123;</span><br><span class="line">	<span class="keyword">return</span> <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">		start := time.Now()</span><br><span class="line">		<span class="comment">// 一定要调用</span></span><br><span class="line">		c.Next()</span><br><span class="line">		fmt.Println(<span class="string">&quot;total time: &quot;</span>, time.Now().Sub(start))</span><br><span class="line">	&#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>使用中间件有多种方式，一种是全局中间件，一种是路由组中间件，一种单个路由中间件</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">router := gin.New() <span class="comment">// 没有使用任何中间件的路由引擎</span></span><br><span class="line"><span class="comment">// 整个路由</span></span><br><span class="line">router.Use(Cost())</span><br><span class="line"></span><br><span class="line"><span class="comment">// 路由组</span></span><br><span class="line">group := r.Group(<span class="string">&quot;/api&quot;</span>)</span><br><span class="line">group.Use(Cost())</span><br><span class="line">&#123;</span><br><span class="line">  group.GET(<span class="string">&quot;/greet&quot;</span>, greet)</span><br><span class="line">  group.POST(<span class="string">&quot;/form&quot;</span>, form)</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">// 单个路由，不会影响其他路由</span></span><br><span class="line">router.POST(<span class="string">&quot;/middleware&quot;</span>, Cost(), controller)</span><br></pre></td></tr></table></figure>
+
+<h3 id="绑定参数至结构体"><a href="#绑定参数至结构体" class="headerlink" title="绑定参数至结构体"></a>绑定参数至结构体</h3><p>在业务中，我们经常需要将用户发送过来的请求绑定到一个特定的结构体中，这样使用起来更加方便，<code>gin</code> 提供了大量的绑定方法，下面以 <code>ShouldBind</code> 为例讲解如何使用：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 首先声明需要绑定参数的结构体</span></span><br><span class="line"><span class="keyword">type</span> LoginReq <span class="keyword">struct</span> &#123;</span><br><span class="line">  <span class="comment">// form 参数指定需要绑定的表单内容</span></span><br><span class="line">  <span class="comment">// binding:&quot;required&quot; 表示不能非空，否则绑定的时候返回错误</span></span><br><span class="line">  <span class="comment">// 如果该字段非必须，可以去掉该tag</span></span><br><span class="line">  Username <span class="keyword">string</span> <span class="string">`form:&quot;username&quot; json:&quot;username&quot;  binding:&quot;required&quot;`</span></span><br><span class="line">  Password <span class="keyword">string</span> <span class="string">`form:&quot;password&quot; json:&quot;password&quot; binding:&quot;required&quot;`</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line">r.POST(<span class="string">&quot;/login&quot;</span>, <span class="function"><span class="keyword">func</span><span class="params">(c *gin.Context)</span></span> &#123;</span><br><span class="line">  <span class="keyword">var</span> form LoginReq</span><br><span class="line"></span><br><span class="line">  <span class="keyword">if</span> err := c.ShouldBind(&amp;form); err != <span class="literal">nil</span> &#123;</span><br><span class="line">    c.JSON(http.StatusOK, gin.H&#123;</span><br><span class="line">      <span class="string">&quot;code&quot;</span>:    <span class="number">-1</span>,</span><br><span class="line">      <span class="string">&quot;message&quot;</span>: err.Error(),</span><br><span class="line">    &#125;)</span><br><span class="line">    <span class="keyword">return</span></span><br><span class="line">  &#125;</span><br><span class="line">  fmt.Printf(<span class="string">&quot;%#v\n&quot;</span>, form)</span><br><span class="line">  c.JSON(http.StatusOK, gin.H&#123;</span><br><span class="line">    <span class="string">&quot;code&quot;</span>:    <span class="number">0</span>,</span><br><span class="line">    <span class="string">&quot;message&quot;</span>: form,</span><br><span class="line">  &#125;)</span><br><span class="line">&#125;)</span><br></pre></td></tr></table></figure>
+
+<p><code>gin</code> 还有很多方面的特性，这里只是简单的介绍了如何去使用，更多的使用方法可以参考<a href="https://gin-gonic.com/docs/">文档</a>，个人之前也用过写了一个<a href="https://github.com/junhaideng/Golang-BBS">小项目</a>。</p>
+]]></content>
+      <categories>
+        <category>Golang</category>
+      </categories>
+      <tags>
+        <tag>Go</tag>
+        <tag>framework</tag>
+        <tag>Gin</tag>
+      </tags>
+  </entry>
 </search>
