@@ -1324,4 +1324,66 @@
         <tag>Gin</tag>
       </tags>
   </entry>
+  <entry>
+    <title>Golang 报错 package xxx is not in GOROOT or GOPATH 或者 cannot find package “xxx“ in any of</title>
+    <url>/2020/07/11/golang/fundamental/import-package/</url>
+    <content><![CDATA[<h2 id="GO111MODULE-”off”"><a href="#GO111MODULE-”off”" class="headerlink" title="GO111MODULE=”off”"></a>GO111MODULE=”off”</h2><p>在 <code>GO111MODULE=&quot;off&quot;</code> 的条件下，并且写的代码不在 <code>$GOPATH/src</code> 下，也就是说下面的 <code>main.go</code> 不在<code>$GOPATH/src</code> 目录下面，同时我想要使用当前项目目录下的另一个 <code>module</code> 里面的可导出标识符(函数、变量等)，但是这个模块 <code>不是标准库</code>，或者说不在 GOROOT 里(一般我们不会修改 GOROOT 中的内容)</p>
+<span id="more"></span>
+
+<img src="structure.png">
+
+<p>运行代码会报错</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">main.go:4:2: cannot find package &quot;module&quot; in any of:</span><br><span class="line">        /usr/local/go/src/module (from $GOROOT)</span><br><span class="line">        /home/linux/go/src/module (from $GOPATH)</span><br></pre></td></tr></table></figure>
+
+<h3 id="解决方案-设置-GOPATH"><a href="#解决方案-设置-GOPATH" class="headerlink" title="解决方案: 设置 GOPATH"></a>解决方案: 设置 <code>GOPATH</code></h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go env -w GOPATH=~/<span class="built_in">test</span></span><br><span class="line"><span class="comment"># 这里设置为 ~/test是因为我需要在~/test/src下面写代码</span></span><br></pre></td></tr></table></figure>
+
+<p>然后在 <code>$GOPATH/src</code> 目录下写</p>
+<img src="1.png">
+
+<p>go 的编译器会在 <code>$GOPATH/src</code> 下面寻找对应的模块，src 下的每一个目录都可以对应一个模块，目录中的目录也可以是一个模块，如果，我们需要访问一个嵌套目录中的模块，比如下图</p>
+<img src="2.png" >
+
+<p>我们需要调用 module 目录中的 moduleA 模块，只需要使用</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;module/moduleA&quot;</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="动图演示"><a href="#动图演示" class="headerlink" title="动图演示"></a>动图演示</h3><img src="gopath.gif">
+
+<hr/>
+
+<h2 id="GO111MODULE-”on”"><a href="#GO111MODULE-”on”" class="headerlink" title="GO111MODULE=”on”"></a>GO111MODULE=”on”</h2><p>在 <code>GO111MODULE=&quot;on&quot;</code> 的条件下，我们直接调用写好的模块，如下图所示</p>
+<img src="3.png">
+
+<p>会直接报错</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">main.go:4:2: package module is not in GOROOT (/usr/local/go/src/module)</span><br></pre></td></tr></table></figure>
+
+<h3 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h3><ul>
+<li>第一种方式：设置 <code>GO111MODULE=&quot;off&quot;</code>，然后像上面的那种方式一样设置 <code>GOPATH</code></li>
+<li>第二种方式：使用 <code>go mod</code>，如下</li>
+</ul>
+<img src="4.png">
+
+<p>首先我们需要初始化一个 <code>go.mod</code> ，使用</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go mod init <span class="built_in">test</span></span><br><span class="line"><span class="comment"># test可以是任意的名称</span></span><br></pre></td></tr></table></figure>
+
+<p>然后我们引入模块的时候，以 <code>test</code> (初始化时定义)开头，然后接模块路径，比如</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;test/module&quot;</span></span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>如果使用这种方式 Goland 报错，但是可以进行正常编译，那么可以删除当前目录下的 <code>.idea</code> 目录然后重启项目即可</p>
+</blockquote>
+<p>如果我们想要引用嵌套模块也是一样的</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;test/module/moduleA&quot;</span></span><br></pre></td></tr></table></figure>
+
+<img src="5.png">
+
+<h3 id="动图演示-1"><a href="#动图演示-1" class="headerlink" title="动图演示"></a>动图演示</h3><img src="gomod.gif">]]></content>
+      <categories>
+        <category>Golang</category>
+      </categories>
+      <tags>
+        <tag>Go</tag>
+        <tag>package</tag>
+        <tag>fundamental</tag>
+      </tags>
+  </entry>
 </search>
