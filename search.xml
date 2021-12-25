@@ -1,73 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
-    <title>一致性哈希</title>
-    <url>/2021/11/09/alg/consistent-hash/</url>
-    <content><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>在介绍一致性哈希之前，首先来看看集群部署可能发生的问题：比如说我现在有5台 <code>Redis</code> 服务器，正常运行了很久，很不巧有一天A服务器崩溃了，这个时候还有4台服务器，系统还可以正常运行，原来发送到A服务器的请求我们肯定要想办法进行重定向吧，如果说我们使用一般的哈希函数进行分配，无疑是 <code>hash(key) % num</code>，不过因为 <code>num</code> 现在变成了 <code>num-1</code>，那么很有可能所有的请求都会发生改变打到不同的服务器上，原来发送到B的请求重新处理之后可能发送到了C服务器了。</p>
-<span id="more"></span>
-
-<img src="hash.svg">
-
-<p>为了规避这种大迁移情况，我们可以使用一致性哈希。</p>
-<h3 id="算法原理"><a href="#算法原理" class="headerlink" title="算法原理"></a>算法原理</h3><p>一致性哈希算法使用的也是取模，但是不同于普通的哈希，我们不是对服务器的数量进行取模，而是对 <code>2^32</code> 取模，也就是相当于对一个固定的数进行取模，我们可以这样认为：所有的哈希值空间构成了一个圆环，如下图：</p>
-<img src="1.svg">
-
-<p>如果我们有多个服务器的，根据某个属性计算哈希值，比如说IP地址，映射到圆环上对应节点，假设说现在我有三个节点，映射之后的结果如下: </p>
-<img src="2.svg">
-
-<p>当某个请求发送过来的时候，根据其中的某个属性计算哈希值，比如说<code>HTTP</code>请求的路径，头部信息等，假设映射到如下的位置</p>
-<img src="3.svg">
-
-<p>根据映射到的位置，我们选择<code>顺时针旋转</code>遇到的第一个服务器节点作为该请求所选择的服务器节点，也就是 <code>B</code> 服务器。</p>
-<p>当我们的某台服务器崩溃的时候，比如 <code>B</code> 崩溃了，那么 <code>A</code> 请求根据一致性哈希原理，会分配到服务器节点 <code>C</code>，更一般的，<code>(A, B]</code> 范围中的请求都会重新分配到服务器节点 <code>C</code>，而其他的请求都不会发生改变，这和之前所述的普通哈希函数不同。</p>
-<p>但是上述的算法在某些情况下表现不好，比如说下面的这种服务器节点分布：</p>
-<img src="4.svg">
-
-<p><code>C</code> 一个节点就占用了大概<code>2/3</code>的取值空间，导致请求分配非常不均匀，针对这种情况，我们可以通过设置多个节点副本，如下：</p>
-<img src="5.svg">
-
-<p>这样处理之后，比之前而言要均匀了很多，理论来说，副本的数量越多，分配的越均匀，但是同时也会增加管理的难度，所以不宜设置过大。</p>
-<h3 id="算法实现"><a href="#算法实现" class="headerlink" title="算法实现"></a>算法实现</h3><p>先简单说一下思路吧，按照上面的原理，我们需要：</p>
-<ul>
-<li>hash 函数：能够支持多副本</li>
-<li>服务器节点映射：哈希值-&gt;服务器节点</li>
-<li>映射的值范围：类似上面的取值圆环<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> consistent <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 副本数量</span></span><br><span class="line">	replicas <span class="keyword">int</span></span><br><span class="line">	<span class="comment">// 所有的server 节点</span></span><br><span class="line">	nodes <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">struct</span>&#123;&#125;</span><br><span class="line">	<span class="comment">// 节点所对应的server</span></span><br><span class="line">	servers <span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">string</span></span><br><span class="line">	<span class="comment">// 保存所有的索引，也就是在hash圆环上的节点</span></span><br><span class="line">	circle uints <span class="comment">// type uints []uint32</span></span><br><span class="line">	<span class="comment">// 采用的hash算法</span></span><br><span class="line">	<span class="comment">// hash 方法可能直接决定节点的分布情况</span></span><br><span class="line">	hash Hash</span><br><span class="line">	sync.RWMutex</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-当一个服务器节点进行映射的时候，会得到多个哈希值(多个副本)，这些哈希值在圆环上对应一个位置</li>
-</ul>
-<img src="6.svg">
-
-<p>但是我们没必要保存一个 <code>2^31-1</code> 大的数组，我们只需要维护一个<code>有序数组</code>就好了，当一个请求过来的时候，我们只需要获取到它的哈希值顺时针的下一个节点哈希值对应的服务器节点就好了</p>
-<h4 id="哈希函数"><a href="#哈希函数" class="headerlink" title="哈希函数"></a>哈希函数</h4><p>哈希函数应该能够支持多副本，方式有很多种，这里采用一个简单的方式，也可以自定义</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;hash/fnv&quot;</span></span><br><span class="line">	<span class="string">&quot;strconv&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="comment">// replica</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">hash</span><span class="params">(key <span class="keyword">string</span>, num <span class="keyword">int</span>)</span> <span class="title">uint32</span></span> &#123;</span><br><span class="line">	h := fnv.New32()</span><br><span class="line">	h.Write([]<span class="keyword">byte</span>(key + <span class="string">&#x27;-&#x27;</span>+ strconv.Itoa(num)))</span><br><span class="line">	<span class="keyword">return</span> h.Sum32()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<h4 id="服务器节点映射"><a href="#服务器节点映射" class="headerlink" title="服务器节点映射"></a>服务器节点映射</h4><p>服务器节点进行哈希之后，需要保存对应的哈希值，这样可以通过哈希值获取到对应的服务器</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">servers := <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">string</span>)</span><br></pre></td></tr></table></figure>
-
-<h4 id="映射值的范围"><a href="#映射值的范围" class="headerlink" title="映射值的范围"></a>映射值的范围</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">circle := <span class="built_in">make</span>([]<span class="keyword">uint32</span>, <span class="number">0</span>)</span><br></pre></td></tr></table></figure>
-
-<p>每一次添加节点的时候，都需要进行重新排序：</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">for</span> i := <span class="number">0</span>; i &lt; replicas; i++ &#123;</span><br><span class="line">  key := hash(node, i)</span><br><span class="line">  circle = <span class="built_in">append</span>(c.circle, key)</span><br><span class="line">  servers[key] = node</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">// 重新进行排序</span></span><br><span class="line">sort.Sort(c.circle)</span><br></pre></td></tr></table></figure>
-<p>而在删除节点的时候，我们只需要删除对应节点的哈希值，顺序维持不变即可。</p>
-<h4 id="支持的方法"><a href="#支持的方法" class="headerlink" title="支持的方法"></a>支持的方法</h4><p>主要支持的方法不是很多，基本的有：</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> ConsistentHasher <span class="keyword">interface</span> &#123;</span><br><span class="line">	<span class="comment">// 添加节点</span></span><br><span class="line">	Add(slot <span class="keyword">string</span>)</span><br><span class="line">	<span class="comment">// 删除节点</span></span><br><span class="line">	Delete(slot <span class="keyword">string</span>)</span><br><span class="line">	<span class="comment">// 数据对应的节点</span></span><br><span class="line">	Get(key <span class="keyword">string</span>) <span class="keyword">string</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<p>添加服务器节点上面已经说了，删除节点的主要代码如下：</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *consistent)</span> <span class="title">Delete</span><span class="params">(node <span class="keyword">string</span>)</span></span> &#123;</span><br><span class="line">	c.Lock()</span><br><span class="line">	<span class="keyword">defer</span> c.Unlock()</span><br><span class="line">	<span class="comment">// 删除节点</span></span><br><span class="line">	<span class="built_in">delete</span>(c.nodes, node)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 因为在数组中删除元素不方便，这里先记录一下需要删除的数据</span></span><br><span class="line">	<span class="comment">// 然后如果在这里面的数据就不再添加到新的记录中</span></span><br><span class="line">	memo := <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">struct</span>&#123;&#125;)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 删除hash圆环中的值</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; c.replicas; i++ &#123;</span><br><span class="line">		key := c.hashKey(node, i)</span><br><span class="line">		memo[key] = <span class="keyword">struct</span>&#123;&#125;&#123;&#125;</span><br><span class="line">		<span class="built_in">delete</span>(c.servers, key)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 创建一个新的保存</span></span><br><span class="line">	newCircle := <span class="built_in">make</span>(uints, <span class="number">0</span>, c.circle.Len()-c.replicas)</span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; c.circle.Len(); i++ &#123;</span><br><span class="line">		<span class="keyword">if</span> _, ok := memo[c.circle[i]]; !ok &#123;</span><br><span class="line">			newCircle = <span class="built_in">append</span>(newCircle, c.circle[i])</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	c.circle = newCircle</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<p>当我们需要获取一个请求对应的服务器节点的时候，我们只要搜索到顺序针第一个服务器节点即可，因为哈希值有序，这里可以采用<code>二分查找</code>的方式</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// Get 获取到属于的server节点</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *consistent)</span> <span class="title">Get</span><span class="params">(name <span class="keyword">string</span>)</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	c.RLock()</span><br><span class="line">	<span class="keyword">defer</span> c.RUnlock()</span><br><span class="line">	<span class="comment">// 首先将hash找到</span></span><br><span class="line">	key := c.hash(name)</span><br><span class="line">	<span class="comment">// 然后在Hash圆环上找到对应的节点</span></span><br><span class="line">	i := sort.Search(<span class="built_in">len</span>(c.circle), <span class="function"><span class="keyword">func</span><span class="params">(i <span class="keyword">int</span>)</span> <span class="title">bool</span></span> &#123; <span class="keyword">return</span> c.circle[i] &gt;= key &#125;)</span><br><span class="line">	</span><br><span class="line">  <span class="comment">// 顺时针计算应该就是第一个节点了</span></span><br><span class="line">  <span class="keyword">if</span> i &gt;= c.circle.Len() &#123;</span><br><span class="line">		i = <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> c.servers[c.circle[i]]</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<p>具体的实现代码已经上传到 <a href="https://github.com/junhaideng/consistent">GitHub</a> 上了</p>
-<h4 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h4><p>一致性哈希在加入和删除节点的时候只会影响相邻的节点，对其他的节点无影响。当节点数量发生变化，我们不希望映射关系全部被打乱的时候，可以采用该算法。</p>
-]]></content>
-      <categories>
-        <category>algorithm</category>
-      </categories>
-      <tags>
-        <tag>distribution</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>负载均衡</title>
     <url>/2021/11/10/alg/load-balance/</url>
     <content><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>在实际生产过程中，我们往往会通过集群的方式部署服务器，而不是单机部署，从而可以提高服务的并发能力。</p>
@@ -175,6 +108,73 @@
 <h4 id="最小连接数"><a href="#最小连接数" class="headerlink" title="最小连接数"></a>最小连接数</h4><p>和最小响应时间类似，需要负载均衡器维护每一个服务器的连接，然后选择连接数量最少的服务器。</p>
 <h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>负载均衡算法是集群部署时常用的算法，合理的负载均衡算法能够更好程度的利用我们的服务器资源，提高系统的承受能力，具体的算法需要根据我们的需求进行选择，比如提供 <code>WebSocket</code> 服务的时候，应该使用 <code>哈希法</code>，根据客户端的 <code>IP</code> 地址计算访问的服务端，从而保证先后访问的服务端都是同一个服务端。</p>
 <p>实现代码参见 <a href="https://github.com/junhaideng/LoadBalance">GitHub</a></p>
+]]></content>
+      <categories>
+        <category>algorithm</category>
+      </categories>
+      <tags>
+        <tag>distribution</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>一致性哈希</title>
+    <url>/2021/11/09/alg/consistent-hash/</url>
+    <content><![CDATA[<h3 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h3><p>在介绍一致性哈希之前，首先来看看集群部署可能发生的问题：比如说我现在有5台 <code>Redis</code> 服务器，正常运行了很久，很不巧有一天A服务器崩溃了，这个时候还有4台服务器，系统还可以正常运行，原来发送到A服务器的请求我们肯定要想办法进行重定向吧，如果说我们使用一般的哈希函数进行分配，无疑是 <code>hash(key) % num</code>，不过因为 <code>num</code> 现在变成了 <code>num-1</code>，那么很有可能所有的请求都会发生改变打到不同的服务器上，原来发送到B的请求重新处理之后可能发送到了C服务器了。</p>
+<span id="more"></span>
+
+<img src="hash.svg">
+
+<p>为了规避这种大迁移情况，我们可以使用一致性哈希。</p>
+<h3 id="算法原理"><a href="#算法原理" class="headerlink" title="算法原理"></a>算法原理</h3><p>一致性哈希算法使用的也是取模，但是不同于普通的哈希，我们不是对服务器的数量进行取模，而是对 <code>2^32</code> 取模，也就是相当于对一个固定的数进行取模，我们可以这样认为：所有的哈希值空间构成了一个圆环，如下图：</p>
+<img src="1.svg">
+
+<p>如果我们有多个服务器的，根据某个属性计算哈希值，比如说IP地址，映射到圆环上对应节点，假设说现在我有三个节点，映射之后的结果如下: </p>
+<img src="2.svg">
+
+<p>当某个请求发送过来的时候，根据其中的某个属性计算哈希值，比如说<code>HTTP</code>请求的路径，头部信息等，假设映射到如下的位置</p>
+<img src="3.svg">
+
+<p>根据映射到的位置，我们选择<code>顺时针旋转</code>遇到的第一个服务器节点作为该请求所选择的服务器节点，也就是 <code>B</code> 服务器。</p>
+<p>当我们的某台服务器崩溃的时候，比如 <code>B</code> 崩溃了，那么 <code>A</code> 请求根据一致性哈希原理，会分配到服务器节点 <code>C</code>，更一般的，<code>(A, B]</code> 范围中的请求都会重新分配到服务器节点 <code>C</code>，而其他的请求都不会发生改变，这和之前所述的普通哈希函数不同。</p>
+<p>但是上述的算法在某些情况下表现不好，比如说下面的这种服务器节点分布：</p>
+<img src="4.svg">
+
+<p><code>C</code> 一个节点就占用了大概<code>2/3</code>的取值空间，导致请求分配非常不均匀，针对这种情况，我们可以通过设置多个节点副本，如下：</p>
+<img src="5.svg">
+
+<p>这样处理之后，比之前而言要均匀了很多，理论来说，副本的数量越多，分配的越均匀，但是同时也会增加管理的难度，所以不宜设置过大。</p>
+<h3 id="算法实现"><a href="#算法实现" class="headerlink" title="算法实现"></a>算法实现</h3><p>先简单说一下思路吧，按照上面的原理，我们需要：</p>
+<ul>
+<li>hash 函数：能够支持多副本</li>
+<li>服务器节点映射：哈希值-&gt;服务器节点</li>
+<li>映射的值范围：类似上面的取值圆环<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> consistent <span class="keyword">struct</span> &#123;</span><br><span class="line">	<span class="comment">// 副本数量</span></span><br><span class="line">	replicas <span class="keyword">int</span></span><br><span class="line">	<span class="comment">// 所有的server 节点</span></span><br><span class="line">	nodes <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">struct</span>&#123;&#125;</span><br><span class="line">	<span class="comment">// 节点所对应的server</span></span><br><span class="line">	servers <span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">string</span></span><br><span class="line">	<span class="comment">// 保存所有的索引，也就是在hash圆环上的节点</span></span><br><span class="line">	circle uints <span class="comment">// type uints []uint32</span></span><br><span class="line">	<span class="comment">// 采用的hash算法</span></span><br><span class="line">	<span class="comment">// hash 方法可能直接决定节点的分布情况</span></span><br><span class="line">	hash Hash</span><br><span class="line">	sync.RWMutex</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+当一个服务器节点进行映射的时候，会得到多个哈希值(多个副本)，这些哈希值在圆环上对应一个位置</li>
+</ul>
+<img src="6.svg">
+
+<p>但是我们没必要保存一个 <code>2^31-1</code> 大的数组，我们只需要维护一个<code>有序数组</code>就好了，当一个请求过来的时候，我们只需要获取到它的哈希值顺时针的下一个节点哈希值对应的服务器节点就好了</p>
+<h4 id="哈希函数"><a href="#哈希函数" class="headerlink" title="哈希函数"></a>哈希函数</h4><p>哈希函数应该能够支持多副本，方式有很多种，这里采用一个简单的方式，也可以自定义</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;hash/fnv&quot;</span></span><br><span class="line">	<span class="string">&quot;strconv&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="comment">// replica</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">hash</span><span class="params">(key <span class="keyword">string</span>, num <span class="keyword">int</span>)</span> <span class="title">uint32</span></span> &#123;</span><br><span class="line">	h := fnv.New32()</span><br><span class="line">	h.Write([]<span class="keyword">byte</span>(key + <span class="string">&#x27;-&#x27;</span>+ strconv.Itoa(num)))</span><br><span class="line">	<span class="keyword">return</span> h.Sum32()</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h4 id="服务器节点映射"><a href="#服务器节点映射" class="headerlink" title="服务器节点映射"></a>服务器节点映射</h4><p>服务器节点进行哈希之后，需要保存对应的哈希值，这样可以通过哈希值获取到对应的服务器</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line">servers := <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">string</span>)</span><br></pre></td></tr></table></figure>
+
+<h4 id="映射值的范围"><a href="#映射值的范围" class="headerlink" title="映射值的范围"></a>映射值的范围</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">circle := <span class="built_in">make</span>([]<span class="keyword">uint32</span>, <span class="number">0</span>)</span><br></pre></td></tr></table></figure>
+
+<p>每一次添加节点的时候，都需要进行重新排序：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">for</span> i := <span class="number">0</span>; i &lt; replicas; i++ &#123;</span><br><span class="line">  key := hash(node, i)</span><br><span class="line">  circle = <span class="built_in">append</span>(c.circle, key)</span><br><span class="line">  servers[key] = node</span><br><span class="line">&#125;</span><br><span class="line"><span class="comment">// 重新进行排序</span></span><br><span class="line">sort.Sort(c.circle)</span><br></pre></td></tr></table></figure>
+<p>而在删除节点的时候，我们只需要删除对应节点的哈希值，顺序维持不变即可。</p>
+<h4 id="支持的方法"><a href="#支持的方法" class="headerlink" title="支持的方法"></a>支持的方法</h4><p>主要支持的方法不是很多，基本的有：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> ConsistentHasher <span class="keyword">interface</span> &#123;</span><br><span class="line">	<span class="comment">// 添加节点</span></span><br><span class="line">	Add(slot <span class="keyword">string</span>)</span><br><span class="line">	<span class="comment">// 删除节点</span></span><br><span class="line">	Delete(slot <span class="keyword">string</span>)</span><br><span class="line">	<span class="comment">// 数据对应的节点</span></span><br><span class="line">	Get(key <span class="keyword">string</span>) <span class="keyword">string</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>添加服务器节点上面已经说了，删除节点的主要代码如下：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *consistent)</span> <span class="title">Delete</span><span class="params">(node <span class="keyword">string</span>)</span></span> &#123;</span><br><span class="line">	c.Lock()</span><br><span class="line">	<span class="keyword">defer</span> c.Unlock()</span><br><span class="line">	<span class="comment">// 删除节点</span></span><br><span class="line">	<span class="built_in">delete</span>(c.nodes, node)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 因为在数组中删除元素不方便，这里先记录一下需要删除的数据</span></span><br><span class="line">	<span class="comment">// 然后如果在这里面的数据就不再添加到新的记录中</span></span><br><span class="line">	memo := <span class="built_in">make</span>(<span class="keyword">map</span>[<span class="keyword">uint32</span>]<span class="keyword">struct</span>&#123;&#125;)</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 删除hash圆环中的值</span></span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; c.replicas; i++ &#123;</span><br><span class="line">		key := c.hashKey(node, i)</span><br><span class="line">		memo[key] = <span class="keyword">struct</span>&#123;&#125;&#123;&#125;</span><br><span class="line">		<span class="built_in">delete</span>(c.servers, key)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 创建一个新的保存</span></span><br><span class="line">	newCircle := <span class="built_in">make</span>(uints, <span class="number">0</span>, c.circle.Len()-c.replicas)</span><br><span class="line">	<span class="keyword">for</span> i := <span class="number">0</span>; i &lt; c.circle.Len(); i++ &#123;</span><br><span class="line">		<span class="keyword">if</span> _, ok := memo[c.circle[i]]; !ok &#123;</span><br><span class="line">			newCircle = <span class="built_in">append</span>(newCircle, c.circle[i])</span><br><span class="line">		&#125;</span><br><span class="line">	&#125;</span><br><span class="line">	c.circle = newCircle</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>当我们需要获取一个请求对应的服务器节点的时候，我们只要搜索到顺序针第一个服务器节点即可，因为哈希值有序，这里可以采用<code>二分查找</code>的方式</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="comment">// Get 获取到属于的server节点</span></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="params">(c *consistent)</span> <span class="title">Get</span><span class="params">(name <span class="keyword">string</span>)</span> <span class="title">string</span></span> &#123;</span><br><span class="line">	c.RLock()</span><br><span class="line">	<span class="keyword">defer</span> c.RUnlock()</span><br><span class="line">	<span class="comment">// 首先将hash找到</span></span><br><span class="line">	key := c.hash(name)</span><br><span class="line">	<span class="comment">// 然后在Hash圆环上找到对应的节点</span></span><br><span class="line">	i := sort.Search(<span class="built_in">len</span>(c.circle), <span class="function"><span class="keyword">func</span><span class="params">(i <span class="keyword">int</span>)</span> <span class="title">bool</span></span> &#123; <span class="keyword">return</span> c.circle[i] &gt;= key &#125;)</span><br><span class="line">	</span><br><span class="line">  <span class="comment">// 顺时针计算应该就是第一个节点了</span></span><br><span class="line">  <span class="keyword">if</span> i &gt;= c.circle.Len() &#123;</span><br><span class="line">		i = <span class="number">0</span></span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> c.servers[c.circle[i]]</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>具体的实现代码已经上传到 <a href="https://github.com/junhaideng/consistent">GitHub</a> 上了</p>
+<h4 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h4><p>一致性哈希在加入和删除节点的时候只会影响相邻的节点，对其他的节点无影响。当节点数量发生变化，我们不希望映射关系全部被打乱的时候，可以采用该算法。</p>
 ]]></content>
       <categories>
         <category>algorithm</category>
@@ -485,6 +485,184 @@
       </tags>
   </entry>
   <entry>
+    <title>Docker 基本使用</title>
+    <url>/2021/07/10/docker/basic/</url>
+    <content><![CDATA[<p><code>Docker</code> 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。</p>
+<p>下面介绍一下基本使用：</p>
+<h2 id="从一个Hello-world开始"><a href="#从一个Hello-world开始" class="headerlink" title="从一个Hello world开始"></a>从一个Hello world开始</h2><p>Docker 可以允许你在容器中运行应用程序，使用 <code>docker run</code> 可以在容器中运行一个应用程序。</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run ubuntu:18.04 /bin/<span class="built_in">echo</span> <span class="string">&quot;Hello world&quot;</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>run</code>: 表示运行一个容器</li>
+<li><code>ubuntu:18.04</code>: 指定要运行的镜像，Docker 首先在本地主机上查找对应的镜像是否存在，如果不存在的话，那么会从远程镜像仓库 <code>Docker Hub</code> 中下载公共镜像，如果没有指定后面的 TAG，那么默认情况下使用的是 latest</li>
+<li><code>/bin/echo &quot;Hello world&quot;</code>: 在启动的容器中执行的命令</li>
+</ul>
+<span id="more"></span>
+
+<p>运行完上面的命令之后，我们会下载一个 <code>ubuntu</code> 镜像，并且创建一个容器，使用下面的命令可以查看所有的镜像文件</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
+
+<p>如果我们不需要这些容器了，我们可以使用下面命令进行删除</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># container 指的是容器的ID或者NAME，可以一次性删除多个</span></span><br><span class="line">docker rm container [container...]</span><br></pre></td></tr></table></figure>
+
+<h3 id="运行交互式容器"><a href="#运行交互式容器" class="headerlink" title="运行交互式容器"></a>运行交互式容器</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -i -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># -i -t 可以合并为-it</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-t</code>: 在新容器中指令一个伪终端或终端</li>
+<li><code>-i:</code> 允许对容器中的标准输入(stdin)进行交互</li>
+</ul>
+<p>输入<code>exit</code>可以退出当前容器</p>
+<h3 id="运行后台模式容器"><a href="#运行后台模式容器" class="headerlink" title="运行后台模式容器"></a>运行后台模式容器</h3><p>使用下面的命令可以创建一个以进程方式运行的容器</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d ubuntu:18.04 /bin/sh -c <span class="string">&quot;while true; do echo hello world; sleep 1; done&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>运行完上面的命令之后会输出一串字符串，表示的是这个 <code>容器ID</code></p>
+<h2 id="容器使用"><a href="#容器使用" class="headerlink" title="容器使用"></a>容器使用</h2><h4 id="获取镜像"><a href="#获取镜像" class="headerlink" title="获取镜像"></a>获取镜像</h4><p>如果本地没有镜像，那么可以使用下面的命令获取 <code>ubuntu</code> 镜像</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker pull ubuntu</span><br></pre></td></tr></table></figure>
+
+<h4 id="启动容器"><a href="#启动容器" class="headerlink" title="启动容器"></a>启动容器</h4><p>使用下面命令启动一个容器，并且以命令行模式进入该容器</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -it ubuntu /bin/bash</span><br><span class="line"><span class="comment"># 默认使用的就是 /bin/bash</span></span><br></pre></td></tr></table></figure>
+
+<p>使用 <code>exit</code> 可退出终端</p>
+<h4 id="后台运行"><a href="#后台运行" class="headerlink" title="后台运行"></a>后台运行</h4><p>在大部分的场景下，我们希望 <code>docker</code> 的服务是在后台运行的，使用 <code>-d</code> 参数指定容器以 <code>守护进程</code> 的形式运行</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name ubuntu-test ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<h4 id="启动、停止容器"><a href="#启动、停止容器" class="headerlink" title="启动、停止容器"></a>启动、停止容器</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker stop container</span><br><span class="line"><span class="comment"># 启动一个已经停止的容器</span></span><br><span class="line">docker start container</span><br><span class="line"><span class="comment"># 重启一个容器</span></span><br><span class="line">docker restart container</span><br></pre></td></tr></table></figure>
+
+<h4 id="进入容器"><a href="#进入容器" class="headerlink" title="进入容器"></a>进入容器</h4><p>在使用 <code>-d</code> 参数时，容器启动会进入后台，此时如果想要进入容器，可以使用下面的指令进入</p>
+<ul>
+<li><code>docker attach container</code></li>
+<li><code>docker exec container</code><blockquote>
+<p>推荐使用 docker exec，因为使用这个方式退出终端之后不会导致容器的停止</p>
+</blockquote>
+</li>
+</ul>
+<p>使用 <code>docker exec</code> 的时候需要指定运行的命令，比如</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker <span class="built_in">exec</span> -it 243c32535da7 /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>而使用 <code>docker attach</code> 的时候会直接进行上一次的命令</p>
+<h4 id="删除容器"><a href="#删除容器" class="headerlink" title="删除容器"></a>删除容器</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker rm container</span><br></pre></td></tr></table></figure>
+
+<p>删除容器的时候必须是停止状态</p>
+<h4 id="查看网络端口映射"><a href="#查看网络端口映射" class="headerlink" title="查看网络端口映射"></a>查看网络端口映射</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># PORTS信息中有</span></span><br><span class="line">docker ps</span><br><span class="line"></span><br><span class="line"><span class="comment"># 查看指定容器的端口映射</span></span><br><span class="line">docker port container</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看容器日志"><a href="#查看容器日志" class="headerlink" title="查看容器日志"></a>查看容器日志</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker logs container</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看容器的进程"><a href="#查看容器的进程" class="headerlink" title="查看容器的进程"></a>查看容器的进程</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker top container</span><br></pre></td></tr></table></figure>
+
+<h4 id="检查容器"><a href="#检查容器" class="headerlink" title="检查容器"></a>检查容器</h4><p>输出容器的一系列信息</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker inspect container</span><br></pre></td></tr></table></figure>
+
+<h3 id="Docker-镜像使用"><a href="#Docker-镜像使用" class="headerlink" title="Docker 镜像使用"></a>Docker 镜像使用</h3><p>当运行容器的时候，如果使用的容器本地不存在，那么 <code>docker</code> 会自动从镜像仓库中下载，默认是 <code>Docker Hub</code> 公共镜像源</p>
+<h4 id="列出所有镜像列表"><a href="#列出所有镜像列表" class="headerlink" title="列出所有镜像列表"></a>列出所有镜像列表</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
+
+<h4 id="获取一个新的镜像"><a href="#获取一个新的镜像" class="headerlink" title="获取一个新的镜像"></a>获取一个新的镜像</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker pull ubuntu:18.04</span><br></pre></td></tr></table></figure>
+
+<h4 id="查找镜像"><a href="#查找镜像" class="headerlink" title="查找镜像"></a>查找镜像</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker search xxx</span><br></pre></td></tr></table></figure>
+
+<h4 id="删除镜像"><a href="#删除镜像" class="headerlink" title="删除镜像"></a>删除镜像</h4><p>镜像的删除使用 docker rmi 命令</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker rmi imageName</span><br></pre></td></tr></table></figure>
+
+<h4 id="设置镜像标签"><a href="#设置镜像标签" class="headerlink" title="设置镜像标签"></a>设置镜像标签</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker tag container xxx:xxx</span><br></pre></td></tr></table></figure>
+
+<h3 id="Docker-容器网络连接"><a href="#Docker-容器网络连接" class="headerlink" title="Docker 容器网络连接"></a>Docker 容器网络连接</h3><p>容器中可以运行一些网络应用，要想让外部也可以访问里面的这些应用，那么可以通过 <code>-P</code> 或者 <code>-p</code> 参数来指定端口映射</p>
+<h4 id="网络端口映射"><a href="#网络端口映射" class="headerlink" title="网络端口映射"></a>网络端口映射</h4><p>比如说运行一个 python 应用</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d -P webapp python app.py</span><br><span class="line"><span class="comment"># 将容器内容的5000(2)端口映射到宿主机的5000(1)端口</span></span><br><span class="line">docker run -d -p 5000:5000 webapp python app.py</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-P</code>: 容器里面的端口随机映射到主机端口</li>
+<li><code>-p</code>: 容器内部端口绑定到指定的主机端口</li>
+<li>端口进行映射之后，我们可以使用 <code>docker ps</code> 或者 <code>docker port container</code> 进行查看对应的端口映射关系</li>
+</ul>
+<p>默认情况下绑定的都是 <code>tcp</code> 端口，如果要绑定 <code>udp</code> 端口，可以再端口后面加 <code>/udp</code></p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d -p 127.0.0.1:5000:5000/udp webapp python app.py</span><br></pre></td></tr></table></figure>
+
+<h4 id="Docker-容器互联"><a href="#Docker-容器互联" class="headerlink" title="Docker 容器互联"></a>Docker 容器互联</h4><p>端口映射不是唯一的将 <code>docker</code> 连接到另一个容器的方法<br><code>docker</code> 有一个连接系统允许将多个容器连接在一起，共享连接信息<br><code>docker</code> 连接会创建一个父子关系，其中父容器可以看到子容器的信息</p>
+<h5 id="端口命名"><a href="#端口命名" class="headerlink" title="端口命名"></a>端口命名</h5><p>当我们创建一个容器的时候，docker 会自动对它进行命名，我们可以使用 <code>--name</code> 参数来自定义命名</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d --name ubuntu -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># 下面方法可以修改一个container的name</span></span><br><span class="line">docker rename container NEW_NAME</span><br></pre></td></tr></table></figure>
+
+<h4 id="新建网络"><a href="#新建网络" class="headerlink" title="新建网络"></a>新建网络</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker network</span><br></pre></td></tr></table></figure>
+
+<p>eg:</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker network create -d bridge test-net</span><br><span class="line"><span class="comment"># -d 表示新建网络内省，有bridge, overlay</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="连接容器"><a href="#连接容器" class="headerlink" title="连接容器"></a>连接容器</h4><p>运行一个容器并连接到新建的网络中</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name test1 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>然后在打开一个新的终端运行一个容器并加入到 test-net 网络中</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name test2 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>然后可以在容器之间进行 ping</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">ping test1  <span class="comment"># test2内</span></span><br><span class="line">ping test2  <span class="comment"># test1内</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Dockerfile"><a href="#Dockerfile" class="headerlink" title="Dockerfile"></a>Dockerfile</h2><p>Dockerfile 可以用来构建一个镜像，文本内容包含了一条条构建镜像所需要的指令和说明</p>
+<h3 id="使用-Dockerfile-定制镜像"><a href="#使用-Dockerfile-定制镜像" class="headerlink" title="使用 Dockerfile 定制镜像"></a>使用 Dockerfile 定制镜像</h3><figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">FROM</span> node</span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> . /server</span></span><br><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> /server</span></span><br><span class="line"><span class="keyword">RUN</span><span class="bash"> npm install --production</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">EXPOSE</span> <span class="number">3001</span></span><br><span class="line"><span class="keyword">ENTRYPOINT</span><span class="bash"> [ <span class="string">&quot;npm&quot;</span>, <span class="string">&quot;run&quot;</span>, <span class="string">&quot;start&quot;</span>]</span></span><br></pre></td></tr></table></figure>
+
+<p><code>FROM</code> 指定使用哪一个镜像源<br><code>RUN</code> 指定要执行的命令<br><code>COPY</code> 执行相应的复制操作</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker build -t centos:6.7 DockerfilePath</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-t</code>: 指定创建的目标镜像名</li>
+<li><code>DockerfilePath</code>: 指定需要使用的 <code>Dockerfile</code> 文件，也可以指定所在目录，但是这样目录中的构建文件名必须是 <code>Dockerfile</code></li>
+</ul>
+<h3 id="构建镜像"><a href="#构建镜像" class="headerlink" title="构建镜像"></a>构建镜像</h3><p>在 Dockerfile 文件的存放目录下，执行构建动作</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker build -t nginx:v3 .</span><br></pre></td></tr></table></figure>
+
+<p><code>.</code>, 上下文路径， 可以用 Dockerfile 的路径来代替，也可以使用目录，只不过构建文件名必须为 Dockerfile</p>
+<h3 id="指令详解"><a href="#指令详解" class="headerlink" title="指令详解"></a>指令详解</h3><h4 id="COPY"><a href="#COPY" class="headerlink" title="COPY"></a>COPY</h4><p>复制指令，从上下文目录中复制文件或者目录到容器里指定路径。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="bash"> [--chown=&lt;user&gt;:&lt;group&gt;] &lt;源路径1&gt;...  &lt;目标路径&gt;</span></span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> [--chown=&lt;user&gt;:&lt;group&gt;] [<span class="string">&quot;&lt;源路径1&gt;&quot;</span>,...  <span class="string">&quot;&lt;目标路径&gt;&quot;</span>]</span></span><br></pre></td></tr></table></figure>
+
+<p><code>--chown=</code>：可选参数，用户改变复制到容器内文件的拥有者和属组。</p>
+<p><code>源路径</code>：源文件或者源目录，这里可以是通配符表达式，其通配符规则要满足 Go 的 filepath.Match 规则。例如：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="bash"> hom* /mydir/</span></span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> hom?.txt /mydir/</span></span><br></pre></td></tr></table></figure>
+
+<p><code>&lt;目标路径&gt;</code>：容器内的指定路径，该路径不用事先建好，路径不存在的话，会自动创建。</p>
+<h4 id="ADD"><a href="#ADD" class="headerlink" title="ADD"></a>ADD</h4><p>ADD 指令和 COPY 的使用格式一致（同样需求下，官方推荐使用 COPY）。功能也类似，不同之处如下：</p>
+<ul>
+<li>ADD 的优点：在执行 &lt;源文件&gt; 为 tar 压缩文件的话，压缩格式为 gzip, bzip2 以及 xz 的情况下，会自动复制并解压到 &lt;目标路径&gt;。</li>
+<li>ADD 的缺点：在不解压的前提下，无法复制 tar 压缩文件。会令镜像构建缓存失效，从而可能会令镜像构建变得比较缓慢。具体是否使用，可以根据是否需要自动解压来决定。</li>
+</ul>
+<h4 id="CMD"><a href="#CMD" class="headerlink" title="CMD"></a>CMD</h4><p>类似于 RUN 指令，用于运行程序，但二者运行的时间点不同:</p>
+<ul>
+<li>CMD 在 <code>docker run</code> 时运行。</li>
+<li>RUN 是在<code>docker build</code>。</li>
+</ul>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">CMD</span><span class="bash"> &lt;shell 命令&gt;</span></span><br><span class="line"><span class="keyword">CMD</span><span class="bash"> [<span class="string">&quot;&lt;可执行文件或命令&gt;&quot;</span>,<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]</span></span><br><span class="line"><span class="keyword">CMD</span><span class="bash"> [<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]  <span class="comment"># 该写法是为 ENTRYPOINT 指令指定的程序提供默认参数</span></span></span><br></pre></td></tr></table></figure>
+
+<p>推荐使用第二种格式，执行过程比较明确。第一种格式实际上在运行的过程中也会自动转换成第二种格式运行，并且默认可执行文件是 sh。</p>
+<h4 id="ENV"><a href="#ENV" class="headerlink" title="ENV"></a>ENV</h4><p>设置环境变量，定义了环境变量，那么在后续的指令中，就可以使用这个环境变量。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">ENV</span> &lt;key&gt; &lt;value&gt;</span><br><span class="line"><span class="keyword">ENV</span> &lt;key1&gt;=&lt;value1&gt; &lt;key2&gt;=&lt;value2&gt;...</span><br></pre></td></tr></table></figure>
+
+<h4 id="EXPOSE"><a href="#EXPOSE" class="headerlink" title="EXPOSE"></a>EXPOSE</h4><p>声明端口</p>
+<p>作用：</p>
+<ul>
+<li>帮助镜像使用者理解这个镜像服务的守护端口，以方便配置映射。</li>
+<li>在运行时使用随机端口映射时，也就是 docker run -P 时，会自动随机映射 EXPOSE 的端口。</li>
+</ul>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">EXPOSE</span> &lt;端口<span class="number">1</span>&gt; [&lt;端口<span class="number">2</span>&gt;...]</span><br></pre></td></tr></table></figure>
+
+<h4 id="WORKDIR"><a href="#WORKDIR" class="headerlink" title="WORKDIR"></a>WORKDIR</h4><p>指定工作目录。用 <code>WORKDIR</code> 指定的工作目录，会在构建镜像的每一层中都存在。（<code>WORKDIR</code> 指定的工作目录，必须是提前创建好的）。</p>
+<p><code>docker build</code> 构建镜像过程中的，每一个 <code>RUN</code> 命令都是新建的一层。只有通过 <code>WORKDIR</code> 创建的目录才会一直存在。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> &lt;工作目录路径&gt;</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="USER"><a href="#USER" class="headerlink" title="USER"></a>USER</h4><p>用于指定执行后续命令的用户和用户组，这边只是切换后续命令执行的用户（用户和用户组必须提前已经存在）。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">USER</span> &lt;用户名&gt;[:&lt;用户组&gt;]</span><br></pre></td></tr></table></figure>
+
+
+]]></content>
+      <categories>
+        <category>docker</category>
+      </categories>
+      <tags>
+        <tag>docker</tag>
+        <tag>container</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>Git 基本使用</title>
     <url>/2021/12/18/git/basic/</url>
     <content><![CDATA[<h2 id="概念"><a href="#概念" class="headerlink" title="概念"></a>概念</h2><p>当我们看到 <code>Git</code> 的时候，涌现上来的第一个想法就是 <code>Git</code> 是什么，我们为什么要使用 <code>Git</code> ？</p>
@@ -687,6 +865,67 @@
       </tags>
   </entry>
   <entry>
+    <title>如何使用 GitHub Actions 制作定时任务</title>
+    <url>/2021/11/22/git/scheduler/</url>
+    <content><![CDATA[<h2 id="介绍"><a href="#介绍" class="headerlink" title="介绍"></a>介绍</h2><p><code>GitHub Actions</code> 是官方提供的一套 <code>DevOps</code> 工具，可以完成软件开发周期的任务，比如可以实现自动化测试，部署等，简单来理解，我们认为它给我们提供了一个服务器，在上面可以执行一系列的指令(不过会有一些限制)，这就意味着我们可以用来<del>白嫖</del>，比如做定时任务，又不需要自己买服务器。</p>
+<p>下面介绍一下如果使用 <code>GitHub Actions</code> 制作一个定时任务，每天定时发布天气情况，当然你学会了之后可以用于签到啊🤭。</p>
+<span id="more"></span>
+
+<h2 id="前置准备"><a href="#前置准备" class="headerlink" title="前置准备"></a>前置准备</h2><p>很简单，只要创建一个 <code>GitHub</code> 仓库，不妨叫做 <code>scheduler</code>， 然后将仓库 <code>git clone</code> 到本地编辑器进行编写即可。</p>
+<h2 id="逻辑代码实现"><a href="#逻辑代码实现" class="headerlink" title="逻辑代码实现"></a>逻辑代码实现</h2><p>这里我们做一个<strong>天气预报</strong>，每天都可以定时发送天气预报到我们的邮件里面去。</p>
+<h3 id="首先第一步，去哪里获取到天气的信息？"><a href="#首先第一步，去哪里获取到天气的信息？" class="headerlink" title="首先第一步，去哪里获取到天气的信息？"></a>首先第一步，去哪里获取到天气的信息？</h3><p>网上有很多天气查询的网站，部分网站提供了对应的 <code>API</code> 接口，但是需要密钥或者限制了调用次数，对于简单的使用来说，比较适合，这里采用爬虫技术从<a href="http://weathernew.pae.baidu.com/weathernew/pc?query=%E6%88%90%E9%83%BD&srcid=4982">百度天气</a>上获取数据，不用受限于密钥和调用次数。</p>
+<h3 id="网站资源找到了，如何拉取数据下来？"><a href="#网站资源找到了，如何拉取数据下来？" class="headerlink" title="网站资源找到了，如何拉取数据下来？"></a>网站资源找到了，如何拉取数据下来？</h3><p>一般来说，写爬虫的时候想要获取数据的时候，我们会使用两种方式进行查看：</p>
+<ul>
+<li>右键查看网页源代码</li>
+<li>分析网络请求，F12 即可</li>
+</ul>
+<p>这里使用第一种方法就可以获取到了，如下为网页源代码，直接包含天气数据：</p>
+<img src="source-code.png"  style="width:500px"/>
+
+<p>然后我们可以使用正则表达式，将对应的数据部分获取下来，并且解析为 <code>JSON</code> 数据，大概代码如下：</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">var</span> dataPattern = regexp.MustCompile(<span class="string">&quot;window.tplData = (.*?);&lt;/script&gt;&quot;</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment">// 省略天气数据定义....</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">getWeather</span><span class="params">(city <span class="keyword">string</span>)</span> <span class="params">(*WeatherData, error)</span></span> &#123;</span><br><span class="line">	<span class="comment">// 发送网络请求，获取源代码</span></span><br><span class="line">	resp, err := http.Get(fmt.Sprintf(<span class="string">&quot;http://weathernew.pae.baidu.com/weathernew/pc?query=%s&amp;srcid=4982&quot;</span>, city))</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">defer</span> resp.Body.Close()</span><br><span class="line">	<span class="comment">// 读取网页源码</span></span><br><span class="line">	data, err := io.ReadAll(resp.Body)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 进行匹配，获取数据</span></span><br><span class="line">	match := dataPattern.FindSubmatch(data)</span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">len</span>(match) == <span class="number">0</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, errors.New(<span class="string">&quot;Do not find weather data&quot;</span>)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 反序列化数据</span></span><br><span class="line">	<span class="keyword">var</span> res WeatherData</span><br><span class="line">	err = json.Unmarshal(match[<span class="number">1</span>], &amp;res)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> &amp;res, err</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>解析之后，我们按照自己的想法拼接信息，然后将数据发送过去即可，这里采用邮件发送，代码如下，当然你可以使用包装更好的一些 <code>package</code>，这里直接使用标准库。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">sendMail</span><span class="params">(to, content <span class="keyword">string</span>)</span> <span class="title">error</span></span> &#123;</span><br><span class="line">	<span class="comment">// 这里采用的是 126 邮箱，不同的邮箱 host 设置不同</span></span><br><span class="line">	auth := smtp.PlainAuth(<span class="string">&quot;&quot;</span>, emailUsername, emailPassword, <span class="string">&quot;smtp.126.com&quot;</span>)</span><br><span class="line">	msg := fmt.Sprintf(<span class="string">&quot;From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: %s; charset=UTF-8\r\n\r\n %s&quot;</span>,</span><br><span class="line">		emailUsername,</span><br><span class="line">		to,</span><br><span class="line">		<span class="string">&quot;每日天气&quot;</span>,</span><br><span class="line">		<span class="string">&quot;text/plain&quot;</span>,</span><br><span class="line">		content,</span><br><span class="line">	)</span><br><span class="line">	err := smtp.SendMail(<span class="string">&quot;smtp.126.com:25&quot;</span>, auth, emailUsername, []<span class="keyword">string</span>&#123;to&#125;, []<span class="keyword">byte</span>(msg))</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Println(<span class="string">&quot;send email failed: &quot;</span>, err)</span><br><span class="line">		<span class="keyword">return</span> err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> <span class="literal">nil</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 简单的示例，可以进行加工</span></span><br><span class="line"><span class="keyword">const</span> tpl = <span class="string">`&#123;&#123;.city&#125;&#125;天气情况：</span></span><br><span class="line"><span class="string"></span></span><br><span class="line"><span class="string">今天是&#123;&#123;.date&#125;&#125;，农历&#123;&#123;.lunar&#125;&#125;，天气&#123;&#123;.weather&#125;&#125;，伴有&#123;&#123;.wind_direction&#125;&#125;，预测今日&#123;&#123;.precipitation_type&#125;&#125;</span></span><br><span class="line"><span class="string">紫外线&#123;&#123;.uv&#125;&#125;, &#123;&#123;.uv_info&#125;&#125;，pm2.5指标为&#123;&#123;.pm25&#125;&#125;, 属于&#123;&#123;.pm25_level&#125;&#125;</span></span><br><span class="line"><span class="string">`</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="comment">// ...</span></span><br><span class="line"></span><br><span class="line">	t, err := template.New(<span class="string">&quot;weather&quot;</span>).Parse(tpl)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Println(<span class="string">&quot;Parse template failed: &quot;</span>, err)</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">var</span> buf = &amp;strings.Builder&#123;&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 将数据添加到模板中</span></span><br><span class="line">	err = t.Execute(buf, <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">string</span>&#123;</span><br><span class="line">		<span class="string">&quot;city&quot;</span>:               city,</span><br><span class="line">		<span class="string">&quot;date&quot;</span>:               data.Base.Date,</span><br><span class="line">		<span class="string">&quot;lunar&quot;</span>:              data.Base.Lunar,</span><br><span class="line">		<span class="string">&quot;weather&quot;</span>:            data.Weather[<span class="string">&quot;weather&quot;</span>],</span><br><span class="line">		<span class="string">&quot;wind_direction&quot;</span>:     data.Weather[<span class="string">&quot;wind_direction&quot;</span>],</span><br><span class="line">		<span class="string">&quot;uv&quot;</span>:                 data.Weather[<span class="string">&quot;uv&quot;</span>],</span><br><span class="line">		<span class="string">&quot;uv_info&quot;</span>:            data.Weather[<span class="string">&quot;uv_info&quot;</span>],</span><br><span class="line">		<span class="string">&quot;precipitation_type&quot;</span>: data.Weather[<span class="string">&quot;precipitation_type&quot;</span>],</span><br><span class="line">		<span class="string">&quot;pm25&quot;</span>:               data.PSPm25.PSPm25,</span><br><span class="line">		<span class="string">&quot;pm25_level&quot;</span>:         data.PSPm25.Level,</span><br><span class="line">	&#125;)</span><br><span class="line"></span><br><span class="line">	sendMail(to, buf.String())</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+
+
+<h2 id="定时任务设置"><a href="#定时任务设置" class="headerlink" title="定时任务设置"></a>定时任务设置</h2><p>定时任务是这次的重点，设置起来其实也挺简单的。</p>
+<p>首先我们需要创建文件夹 <code>.github/workflows</code>，文件夹下面可以创建工作流程文件，只要是 <code>.yml</code> 文件都会作为一个单独的工作流程文件，每一个文件都会在事件触发的时候执行，比如在提交代码，提PR的时候等。</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 比如仅在push的时候执行</span></span><br><span class="line"><span class="attr">on:</span> <span class="string">push</span></span><br><span class="line"><span class="comment"># push 或者 pull_request 的时候执行</span></span><br><span class="line"><span class="attr">on:</span> [<span class="string">push</span>, <span class="string">pull_request</span>]</span><br><span class="line"><span class="comment"># 同时也可以指定分支</span></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">push:</span></span><br><span class="line">    <span class="attr">branches:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">main</span></span><br></pre></td></tr></table></figure>
+
+<p>更加具体的语法可以参加<a href="https://docs.github.com/en/actions">官方文档</a>介绍，这里不再赘述，如果我们想要定义一个定时任务，那么触发事件可以类比下面的方式</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">schedule:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span>  <span class="string">&#x27;30 5,17 * * *&#x27;</span> <span class="comment"># 每天5:30, 17:30执行，时间为国际标准时间，非北京时间！！</span></span><br></pre></td></tr></table></figure>
+
+<p>其中 <code>cron</code> 语法和 <code>Linux</code> 中的一致，如下</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">┌───────────── 分钟 (0 - 59)</span><br><span class="line">│ ┌───────────── 小时 (0 - 23)</span><br><span class="line">│ │ ┌───────────── 日期 (1 - 31)</span><br><span class="line">│ │ │ ┌───────────── 月 (1 - 12 or JAN-DEC)</span><br><span class="line">│ │ │ │ ┌───────────── 星期 (0 - 6 or SUN-SAT)</span><br><span class="line">│ │ │ │ │</span><br><span class="line">│ │ │ │ │</span><br><span class="line">│ │ │ │ │</span><br><span class="line">* * * * *</span><br></pre></td></tr></table></figure>
+
+<p>如果你不清楚输出的表示什么时间，那么你可以在 <a href="https://crontab.guru/">crontab guru</a> 中进行测试。而对于我们的天气预报来说，我们的工作流程文件可以定义为：</p>
+<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">name:</span> <span class="string">weather-report</span> <span class="comment"># 工作流程名称，会在网页中进行显示</span></span><br><span class="line"></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">push:</span>  <span class="comment"># 为了调试方便，修改代码之后push上去即可以看到效果</span></span><br><span class="line">    <span class="attr">paths:</span> <span class="comment"># 指定只有哪些文件修改了才会触发该工作流程</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">weather-report/**</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">.github/workflows/weather-report.yml</span></span><br><span class="line">  <span class="attr">schedule:</span> <span class="comment"># 定时任务</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span> <span class="string">&quot;0 0 * * *&quot;</span> <span class="comment"># 每天 0 点跑 =&gt; 东八区 8点</span></span><br><span class="line"></span><br><span class="line"><span class="attr">jobs:</span></span><br><span class="line">  <span class="attr">weather-report:</span></span><br><span class="line">    <span class="attr">runs-on:</span> <span class="string">&quot;ubuntu-latest&quot;</span> <span class="comment"># 在什么机器上跑</span></span><br><span class="line">    <span class="attr">env:</span> <span class="comment"># 设置的一些 secret，在 settings 中可以设置</span></span><br><span class="line">      <span class="attr">EMAIL_USERNAME:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.EMAIL_USERNAME</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">EMAIL_PASSWORD:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.EMAIL_PASSWORD</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">TO:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.TO</span> <span class="string">&#125;&#125;</span></span><br><span class="line">    <span class="attr">steps:</span> <span class="comment"># 指定的步骤</span></span><br><span class="line">      <span class="bullet">-</span> <span class="attr">uses:</span> <span class="string">actions/checkout@v2</span> </span><br><span class="line">      <span class="bullet">-</span> <span class="attr">uses:</span> <span class="string">actions/setup-go@v2</span>  <span class="comment"># 使用 golang </span></span><br><span class="line">        <span class="attr">with:</span></span><br><span class="line">          <span class="attr">go-version:</span> <span class="string">&quot;^1.17&quot;</span> <span class="comment"># 版本号</span></span><br><span class="line">      <span class="bullet">-</span> <span class="attr">run:</span> <span class="string">go</span> <span class="string">run</span> <span class="string">weather-report/main.go</span> <span class="string">-eu</span> <span class="string">$EMAIL_USERNAME</span> <span class="string">-ep</span> <span class="string">$EMAIL_PASSWORD</span> <span class="string">-to</span> <span class="string">$TO</span>  <span class="comment"># 指定的命令</span></span><br></pre></td></tr></table></figure>
+
+<p>所有代码编写完成之后，push 到仓库中，便可以查看到正在执行的行为。</p>
+<img width=500 src="actions.png" >
+
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>核心步骤其实很简单：</p>
+<ul>
+<li>创建仓库，<code>clone</code> 下来</li>
+<li>进行逻辑代码编写</li>
+<li>创建 <code>.github/workflows</code> 目录，并编写工作流程文件</li>
+<li><code>push</code> 代码上去，事件触发时执行</li>
+</ul>
+<p>工作流程文件的编写并不是很复杂，如果我们会 <code>docker-compose.yml</code> 的编写，很容易就掌握了基本内容，其他需要的语法到时候翻翻官方文档即可，而且官方提供了大量的模板供使用。</p>
+<p>上述的这个定时任务并没有什么很大的使用之处，毕竟人手一台手机，天气点一点就是知道的事了，比这个方便美观多了，其实更重要是学习怎么利用爬虫去获取简单的数据，以及 <code>GitHub Actions</code> 的使用，如果把签到作为定时任务，那么定会得到极大的解放🧐。</p>
+<p>不过，<code>GitHub Actions</code> 的使用当然不仅限于此，自动化测试，自动化部署都可以通过它实现~</p>
+]]></content>
+      <categories>
+        <category>GitHub</category>
+      </categories>
+      <tags>
+        <tag>GitHub Actions</tag>
+        <tag>Scheduler</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>动手写一个 HTTP 正向代理</title>
     <url>/2021/12/06/network/http-proxy/</url>
     <content><![CDATA[<h2 id="概念"><a href="#概念" class="headerlink" title="概念"></a>概念</h2><p>首先我们来了解一下 <code>HTTP</code> 代理的相关概念，通常来说，有两类 <code>HTTP</code> 代理，一类是<code>正向代理</code>，一类是<code>反向代理</code>，虽都是代理，但仍有区别。</p>
@@ -752,67 +991,6 @@
       <tags>
         <tag>HTTP</tag>
         <tag>proxy</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>如何使用 GitHub Actions 制作定时任务</title>
-    <url>/2021/11/22/git/scheduler/</url>
-    <content><![CDATA[<h2 id="介绍"><a href="#介绍" class="headerlink" title="介绍"></a>介绍</h2><p><code>GitHub Actions</code> 是官方提供的一套 <code>DevOps</code> 工具，可以完成软件开发周期的任务，比如可以实现自动化测试，部署等，简单来理解，我们认为它给我们提供了一个服务器，在上面可以执行一系列的指令(不过会有一些限制)，这就意味着我们可以用来<del>白嫖</del>，比如做定时任务，又不需要自己买服务器。</p>
-<p>下面介绍一下如果使用 <code>GitHub Actions</code> 制作一个定时任务，每天定时发布天气情况，当然你学会了之后可以用于签到啊🤭。</p>
-<span id="more"></span>
-
-<h2 id="前置准备"><a href="#前置准备" class="headerlink" title="前置准备"></a>前置准备</h2><p>很简单，只要创建一个 <code>GitHub</code> 仓库，不妨叫做 <code>scheduler</code>， 然后将仓库 <code>git clone</code> 到本地编辑器进行编写即可。</p>
-<h2 id="逻辑代码实现"><a href="#逻辑代码实现" class="headerlink" title="逻辑代码实现"></a>逻辑代码实现</h2><p>这里我们做一个<strong>天气预报</strong>，每天都可以定时发送天气预报到我们的邮件里面去。</p>
-<h3 id="首先第一步，去哪里获取到天气的信息？"><a href="#首先第一步，去哪里获取到天气的信息？" class="headerlink" title="首先第一步，去哪里获取到天气的信息？"></a>首先第一步，去哪里获取到天气的信息？</h3><p>网上有很多天气查询的网站，部分网站提供了对应的 <code>API</code> 接口，但是需要密钥或者限制了调用次数，对于简单的使用来说，比较适合，这里采用爬虫技术从<a href="http://weathernew.pae.baidu.com/weathernew/pc?query=%E6%88%90%E9%83%BD&srcid=4982">百度天气</a>上获取数据，不用受限于密钥和调用次数。</p>
-<h3 id="网站资源找到了，如何拉取数据下来？"><a href="#网站资源找到了，如何拉取数据下来？" class="headerlink" title="网站资源找到了，如何拉取数据下来？"></a>网站资源找到了，如何拉取数据下来？</h3><p>一般来说，写爬虫的时候想要获取数据的时候，我们会使用两种方式进行查看：</p>
-<ul>
-<li>右键查看网页源代码</li>
-<li>分析网络请求，F12 即可</li>
-</ul>
-<p>这里使用第一种方法就可以获取到了，如下为网页源代码，直接包含天气数据：</p>
-<img src="source-code.png"  style="width:500px"/>
-
-<p>然后我们可以使用正则表达式，将对应的数据部分获取下来，并且解析为 <code>JSON</code> 数据，大概代码如下：</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">var</span> dataPattern = regexp.MustCompile(<span class="string">&quot;window.tplData = (.*?);&lt;/script&gt;&quot;</span>)</span><br><span class="line"></span><br><span class="line"><span class="comment">// 省略天气数据定义....</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">getWeather</span><span class="params">(city <span class="keyword">string</span>)</span> <span class="params">(*WeatherData, error)</span></span> &#123;</span><br><span class="line">	<span class="comment">// 发送网络请求，获取源代码</span></span><br><span class="line">	resp, err := http.Get(fmt.Sprintf(<span class="string">&quot;http://weathernew.pae.baidu.com/weathernew/pc?query=%s&amp;srcid=4982&quot;</span>, city))</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">defer</span> resp.Body.Close()</span><br><span class="line">	<span class="comment">// 读取网页源码</span></span><br><span class="line">	data, err := io.ReadAll(resp.Body)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="comment">// 进行匹配，获取数据</span></span><br><span class="line">	match := dataPattern.FindSubmatch(data)</span><br><span class="line">	<span class="keyword">if</span> <span class="built_in">len</span>(match) == <span class="number">0</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, errors.New(<span class="string">&quot;Do not find weather data&quot;</span>)</span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 反序列化数据</span></span><br><span class="line">	<span class="keyword">var</span> res WeatherData</span><br><span class="line">	err = json.Unmarshal(match[<span class="number">1</span>], &amp;res)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		<span class="keyword">return</span> <span class="literal">nil</span>, err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> &amp;res, err</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<p>解析之后，我们按照自己的想法拼接信息，然后将数据发送过去即可，这里采用邮件发送，代码如下，当然你可以使用包装更好的一些 <code>package</code>，这里直接使用标准库。</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">sendMail</span><span class="params">(to, content <span class="keyword">string</span>)</span> <span class="title">error</span></span> &#123;</span><br><span class="line">	<span class="comment">// 这里采用的是 126 邮箱，不同的邮箱 host 设置不同</span></span><br><span class="line">	auth := smtp.PlainAuth(<span class="string">&quot;&quot;</span>, emailUsername, emailPassword, <span class="string">&quot;smtp.126.com&quot;</span>)</span><br><span class="line">	msg := fmt.Sprintf(<span class="string">&quot;From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: %s; charset=UTF-8\r\n\r\n %s&quot;</span>,</span><br><span class="line">		emailUsername,</span><br><span class="line">		to,</span><br><span class="line">		<span class="string">&quot;每日天气&quot;</span>,</span><br><span class="line">		<span class="string">&quot;text/plain&quot;</span>,</span><br><span class="line">		content,</span><br><span class="line">	)</span><br><span class="line">	err := smtp.SendMail(<span class="string">&quot;smtp.126.com:25&quot;</span>, auth, emailUsername, []<span class="keyword">string</span>&#123;to&#125;, []<span class="keyword">byte</span>(msg))</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Println(<span class="string">&quot;send email failed: &quot;</span>, err)</span><br><span class="line">		<span class="keyword">return</span> err</span><br><span class="line">	&#125;</span><br><span class="line">	<span class="keyword">return</span> <span class="literal">nil</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 简单的示例，可以进行加工</span></span><br><span class="line"><span class="keyword">const</span> tpl = <span class="string">`&#123;&#123;.city&#125;&#125;天气情况：</span></span><br><span class="line"><span class="string"></span></span><br><span class="line"><span class="string">今天是&#123;&#123;.date&#125;&#125;，农历&#123;&#123;.lunar&#125;&#125;，天气&#123;&#123;.weather&#125;&#125;，伴有&#123;&#123;.wind_direction&#125;&#125;，预测今日&#123;&#123;.precipitation_type&#125;&#125;</span></span><br><span class="line"><span class="string">紫外线&#123;&#123;.uv&#125;&#125;, &#123;&#123;.uv_info&#125;&#125;，pm2.5指标为&#123;&#123;.pm25&#125;&#125;, 属于&#123;&#123;.pm25_level&#125;&#125;</span></span><br><span class="line"><span class="string">`</span></span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	<span class="comment">// ...</span></span><br><span class="line"></span><br><span class="line">	t, err := template.New(<span class="string">&quot;weather&quot;</span>).Parse(tpl)</span><br><span class="line">	<span class="keyword">if</span> err != <span class="literal">nil</span> &#123;</span><br><span class="line">		fmt.Println(<span class="string">&quot;Parse template failed: &quot;</span>, err)</span><br><span class="line">		<span class="keyword">return</span></span><br><span class="line">	&#125;</span><br><span class="line"></span><br><span class="line">	<span class="keyword">var</span> buf = &amp;strings.Builder&#123;&#125;</span><br><span class="line"></span><br><span class="line">	<span class="comment">// 将数据添加到模板中</span></span><br><span class="line">	err = t.Execute(buf, <span class="keyword">map</span>[<span class="keyword">string</span>]<span class="keyword">string</span>&#123;</span><br><span class="line">		<span class="string">&quot;city&quot;</span>:               city,</span><br><span class="line">		<span class="string">&quot;date&quot;</span>:               data.Base.Date,</span><br><span class="line">		<span class="string">&quot;lunar&quot;</span>:              data.Base.Lunar,</span><br><span class="line">		<span class="string">&quot;weather&quot;</span>:            data.Weather[<span class="string">&quot;weather&quot;</span>],</span><br><span class="line">		<span class="string">&quot;wind_direction&quot;</span>:     data.Weather[<span class="string">&quot;wind_direction&quot;</span>],</span><br><span class="line">		<span class="string">&quot;uv&quot;</span>:                 data.Weather[<span class="string">&quot;uv&quot;</span>],</span><br><span class="line">		<span class="string">&quot;uv_info&quot;</span>:            data.Weather[<span class="string">&quot;uv_info&quot;</span>],</span><br><span class="line">		<span class="string">&quot;precipitation_type&quot;</span>: data.Weather[<span class="string">&quot;precipitation_type&quot;</span>],</span><br><span class="line">		<span class="string">&quot;pm25&quot;</span>:               data.PSPm25.PSPm25,</span><br><span class="line">		<span class="string">&quot;pm25_level&quot;</span>:         data.PSPm25.Level,</span><br><span class="line">	&#125;)</span><br><span class="line"></span><br><span class="line">	sendMail(to, buf.String())</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-
-
-<h2 id="定时任务设置"><a href="#定时任务设置" class="headerlink" title="定时任务设置"></a>定时任务设置</h2><p>定时任务是这次的重点，设置起来其实也挺简单的。</p>
-<p>首先我们需要创建文件夹 <code>.github/workflows</code>，文件夹下面可以创建工作流程文件，只要是 <code>.yml</code> 文件都会作为一个单独的工作流程文件，每一个文件都会在事件触发的时候执行，比如在提交代码，提PR的时候等。</p>
-<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="comment"># 比如仅在push的时候执行</span></span><br><span class="line"><span class="attr">on:</span> <span class="string">push</span></span><br><span class="line"><span class="comment"># push 或者 pull_request 的时候执行</span></span><br><span class="line"><span class="attr">on:</span> [<span class="string">push</span>, <span class="string">pull_request</span>]</span><br><span class="line"><span class="comment"># 同时也可以指定分支</span></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">push:</span></span><br><span class="line">    <span class="attr">branches:</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">main</span></span><br></pre></td></tr></table></figure>
-
-<p>更加具体的语法可以参加<a href="https://docs.github.com/en/actions">官方文档</a>介绍，这里不再赘述，如果我们想要定义一个定时任务，那么触发事件可以类比下面的方式</p>
-<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">schedule:</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span>  <span class="string">&#x27;30 5,17 * * *&#x27;</span> <span class="comment"># 每天5:30, 17:30执行，时间为国际标准时间，非北京时间！！</span></span><br></pre></td></tr></table></figure>
-
-<p>其中 <code>cron</code> 语法和 <code>Linux</code> 中的一致，如下</p>
-<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">┌───────────── 分钟 (0 - 59)</span><br><span class="line">│ ┌───────────── 小时 (0 - 23)</span><br><span class="line">│ │ ┌───────────── 日期 (1 - 31)</span><br><span class="line">│ │ │ ┌───────────── 月 (1 - 12 or JAN-DEC)</span><br><span class="line">│ │ │ │ ┌───────────── 星期 (0 - 6 or SUN-SAT)</span><br><span class="line">│ │ │ │ │</span><br><span class="line">│ │ │ │ │</span><br><span class="line">│ │ │ │ │</span><br><span class="line">* * * * *</span><br></pre></td></tr></table></figure>
-
-<p>如果你不清楚输出的表示什么时间，那么你可以在 <a href="https://crontab.guru/">crontab guru</a> 中进行测试。而对于我们的天气预报来说，我们的工作流程文件可以定义为：</p>
-<figure class="highlight yaml"><table><tr><td class="code"><pre><span class="line"><span class="attr">name:</span> <span class="string">weather-report</span> <span class="comment"># 工作流程名称，会在网页中进行显示</span></span><br><span class="line"></span><br><span class="line"><span class="attr">on:</span></span><br><span class="line">  <span class="attr">push:</span>  <span class="comment"># 为了调试方便，修改代码之后push上去即可以看到效果</span></span><br><span class="line">    <span class="attr">paths:</span> <span class="comment"># 指定只有哪些文件修改了才会触发该工作流程</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">weather-report/**</span></span><br><span class="line">      <span class="bullet">-</span> <span class="string">.github/workflows/weather-report.yml</span></span><br><span class="line">  <span class="attr">schedule:</span> <span class="comment"># 定时任务</span></span><br><span class="line">    <span class="bullet">-</span> <span class="attr">cron:</span> <span class="string">&quot;0 0 * * *&quot;</span> <span class="comment"># 每天 0 点跑 =&gt; 东八区 8点</span></span><br><span class="line"></span><br><span class="line"><span class="attr">jobs:</span></span><br><span class="line">  <span class="attr">weather-report:</span></span><br><span class="line">    <span class="attr">runs-on:</span> <span class="string">&quot;ubuntu-latest&quot;</span> <span class="comment"># 在什么机器上跑</span></span><br><span class="line">    <span class="attr">env:</span> <span class="comment"># 设置的一些 secret，在 settings 中可以设置</span></span><br><span class="line">      <span class="attr">EMAIL_USERNAME:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.EMAIL_USERNAME</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">EMAIL_PASSWORD:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.EMAIL_PASSWORD</span> <span class="string">&#125;&#125;</span></span><br><span class="line">      <span class="attr">TO:</span> <span class="string">$&#123;&#123;</span> <span class="string">secrets.TO</span> <span class="string">&#125;&#125;</span></span><br><span class="line">    <span class="attr">steps:</span> <span class="comment"># 指定的步骤</span></span><br><span class="line">      <span class="bullet">-</span> <span class="attr">uses:</span> <span class="string">actions/checkout@v2</span> </span><br><span class="line">      <span class="bullet">-</span> <span class="attr">uses:</span> <span class="string">actions/setup-go@v2</span>  <span class="comment"># 使用 golang </span></span><br><span class="line">        <span class="attr">with:</span></span><br><span class="line">          <span class="attr">go-version:</span> <span class="string">&quot;^1.17&quot;</span> <span class="comment"># 版本号</span></span><br><span class="line">      <span class="bullet">-</span> <span class="attr">run:</span> <span class="string">go</span> <span class="string">run</span> <span class="string">weather-report/main.go</span> <span class="string">-eu</span> <span class="string">$EMAIL_USERNAME</span> <span class="string">-ep</span> <span class="string">$EMAIL_PASSWORD</span> <span class="string">-to</span> <span class="string">$TO</span>  <span class="comment"># 指定的命令</span></span><br></pre></td></tr></table></figure>
-
-<p>所有代码编写完成之后，push 到仓库中，便可以查看到正在执行的行为。</p>
-<img width=500 src="actions.png" >
-
-<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>核心步骤其实很简单：</p>
-<ul>
-<li>创建仓库，<code>clone</code> 下来</li>
-<li>进行逻辑代码编写</li>
-<li>创建 <code>.github/workflows</code> 目录，并编写工作流程文件</li>
-<li><code>push</code> 代码上去，事件触发时执行</li>
-</ul>
-<p>工作流程文件的编写并不是很复杂，如果我们会 <code>docker-compose.yml</code> 的编写，很容易就掌握了基本内容，其他需要的语法到时候翻翻官方文档即可，而且官方提供了大量的模板供使用。</p>
-<p>上述的这个定时任务并没有什么很大的使用之处，毕竟人手一台手机，天气点一点就是知道的事了，比这个方便美观多了，其实更重要是学习怎么利用爬虫去获取简单的数据，以及 <code>GitHub Actions</code> 的使用，如果把签到作为定时任务，那么定会得到极大的解放🧐。</p>
-<p>不过，<code>GitHub Actions</code> 的使用当然不仅限于此，自动化测试，自动化部署都可以通过它实现~</p>
-]]></content>
-      <categories>
-        <category>GitHub</category>
-      </categories>
-      <tags>
-        <tag>GitHub Actions</tag>
-        <tag>Scheduler</tag>
       </tags>
   </entry>
   <entry>
@@ -888,6 +1066,307 @@
       </categories>
       <tags>
         <tag>HTTP</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>哈希函数</title>
+    <url>/2021/12/24/cryptography/signature/hash/</url>
+    <content><![CDATA[<h2 id="概念"><a href="#概念" class="headerlink" title="概念"></a>概念</h2><p><strong>什么是哈希函数？</strong></p>
+<p>定义其实很简单，哈希函数其实就是一种映射关系，它可以把任意长度的数据映射为固定长度的数据，输出一般称为<strong>摘要(digest)</strong> ，就比如常见的 <code>md5</code> 算法，可以将输入映射成 <code>128 bits</code>。</p>
+<p>$$\{0, 1\}^* \overset{map}{\longrightarrow} \{0,1\}^n$$</p>
+<p>同时，也正因为说，哈希函数将任意长度的输入映射成固定长度的输出，因为输入空间远大于输出空间，所以必然会存在冲突，比如下面的这种情景。不过，在实际使用的时候，必须要求哈希函数具备一定的安全性。</p>
+<span id="more"></span>
+
+<img src="map.svg">
+
+<h2 id="要求"><a href="#要求" class="headerlink" title="要求"></a>要求</h2><blockquote>
+<p>以下只是几点比较重要的</p>
+</blockquote>
+<h3 id="计算-digest-比较快"><a href="#计算-digest-比较快" class="headerlink" title="计算 digest 比较快"></a>计算 digest 比较快</h3><p>因为我们往往需要对大量的数据计算哈希值，如果计算速度慢，会影响整个系统的性能。</p>
+<h3 id="抗第一原像"><a href="#抗第一原像" class="headerlink" title="抗第一原像"></a>抗第一原像</h3><p>又称 <code>Preimage resistance</code>。</p>
+<p>已知某个哈希值 $y$ 和哈希函数 $H$，找出 $x$ 满足 $H(x) = y$ 在计算上不可行。</p>
+<h3 id="抗第二原像性"><a href="#抗第二原像性" class="headerlink" title="抗第二原像性"></a>抗第二原像性</h3><p>又称 <code>Second-preimage resistance</code>。</p>
+<p>已知某个输入 $x$ 和哈希函数 $H$，找到 $x^{\prime}$ 满足 $H(x^{\prime}) = H(x)$ 在计算上不可行。</p>
+<h3 id="抗碰撞性"><a href="#抗碰撞性" class="headerlink" title="抗碰撞性"></a>抗碰撞性</h3><p>又称 <code>Collision resistance</code>。</p>
+<p>已知哈希函数 $H$，找出任意一对 $x^{\prime}, x$， 且 $x^{\prime} \neq x$ 满足 $H(x^{\prime}) = H(x)$，在计算上不可行</p>
+<h2 id="应用"><a href="#应用" class="headerlink" title="应用"></a>应用</h2><h3 id="文件校验"><a href="#文件校验" class="headerlink" title="文件校验"></a>文件校验</h3><p>网站上的文件，在下载的时候，往往会提供一个摘要来检验文件是否下载完整，比如说下图<a href="https://mirror.tuna.tsinghua.edu.cn/ubuntu-releases/20.04/">^1</a>的 SHA256SUMS 文件</p>
+<img src="checksum.png">
+
+
+<h3 id="数字签名"><a href="#数字签名" class="headerlink" title="数字签名"></a>数字签名</h3><p>数字签名有类似书写签名的作用，可以对数据提供<strong>身份校验</strong>以及<strong>完整性校验</strong>。</p>
+<p>我们经常访问的 HTTPS 网站均提供了数字证书，为的就是校验这个网站颁发给我们的公钥是不是这个网站的，还是其他人伪造的一个公钥，点击网址签名的小锁 🔒。</p>
+<img src="signature.png" style="max-width: 300px;">
+
+
+<p>进入 <code>Connection is secure</code>，然后点击右上角的证书图标，我们可以看到数字证书中的内容。</p>
+<img src="certificate.png" style="max-width: 300px;">
+
+
+<h2 id="Go-中哈希函数使用示范"><a href="#Go-中哈希函数使用示范" class="headerlink" title="Go 中哈希函数使用示范"></a>Go 中哈希函数使用示范</h2><p>Golang 中提供了许多哈希函数，比如 <code>md5</code>，<code>sha1</code>，<code>sha256</code>，<code>sha512</code>等，并且通过接口<code>hash.Hash</code> 暴露，使用起来十分简单，下面以 <code>md5</code> 做示范。</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">package</span> main</span><br><span class="line"></span><br><span class="line"><span class="keyword">import</span> (</span><br><span class="line">	<span class="string">&quot;crypto/md5&quot;</span></span><br><span class="line">	<span class="string">&quot;fmt&quot;</span></span><br><span class="line">)</span><br><span class="line"></span><br><span class="line"><span class="function"><span class="keyword">func</span> <span class="title">main</span><span class="params">()</span></span> &#123;</span><br><span class="line">	msg := []<span class="keyword">byte</span>(<span class="string">&quot;Hello World&quot;</span>)</span><br><span class="line"></span><br><span class="line">	h := md5.New()</span><br><span class="line">	h.Write(msg)</span><br><span class="line"></span><br><span class="line">	fmt.Printf(<span class="string">&quot;Sum: %x\n&quot;</span>, h.Sum(<span class="literal">nil</span>))</span><br><span class="line">	<span class="comment">// Sum: b10a8db164e0754105b7a99be72e3fe5</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br></pre></td></tr></table></figure>
+
+]]></content>
+      <categories>
+        <category>Cryptography</category>
+      </categories>
+      <tags>
+        <tag>Go</tag>
+        <tag>hash</tag>
+        <tag>cryptography</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Hash to Obtain Random Subset (HORS)</title>
+    <url>/2021/12/25/cryptography/signature/hors/</url>
+    <content><![CDATA[<p>HORS(Hash to Obtain Random Subset)属于 FTS, 其生成的公私钥对，可以多次用来签名消息，但是每一次签名之后，系统的安全性会降低，签名能够被伪造的概率上升。论文可见 <a href="hors.pdf">Better than BiBa: Short One-time Signatures with Fast Signing and Verifying</a>。</p>
+<p>下面以三元组 $(GEN, SIG, VER)$ 对 HORS 签名系统进行介绍。</p>
+<h2 id="密钥生成-GEN"><a href="#密钥生成-GEN" class="headerlink" title="密钥生成($GEN$)"></a>密钥生成($GEN$)</h2><p>$$(pk, sk) \leftarrow GEN(1^k)$$</p>
+<p>首先，我们需要确定参数 $k$ 和 $t = 2^\tau$，哈希函数输出的摘要长度为 $n = k \times \log_2t = k \times \tau$ bits。</p>
+<span id="more"></span>
+
+<p>这里，我们一般要求 $8\mid \tau$，也就是 $\tau$ 应该是 $8$ 的倍数。</p>
+<p>通过 $PRG$ 生成 $t$ 个随机数，构成私钥：</p>
+<p>$$sk = (sk_0, sk_1, \dotsm, sk_{t-1})$$</p>
+<p>对每一个随机数进行哈希，得到公钥</p>
+<p>$$\begin{aligned}<br>  pk &amp;= (pk_0, pk_1, \dotsm, pk_{t-1}) \\ &amp;= (hash(sk_0), hash(sk_1), \dotsm, hash(sk_{t-1}))<br>\end{aligned}$$</p>
+<p>图示：</p>
+<img src="gen.svg">
+
+<h2 id="消息签名-SIG"><a href="#消息签名-SIG" class="headerlink" title="消息签名($SIG$)"></a>消息签名($SIG$)</h2><p>$$ \sigma(M) \leftarrow SIG(M, sk)$$</p>
+<p>对消息 $M\in \{0, 1\}^*$ 进行哈希，得到摘要 $m$。</p>
+<p>将 $m$ 进行分割，分成 $k$ 份，每一份 $\tau = \log_2t$ bits，这里如果 $8|\tau$，那么编写程序的时候会得到极大的简化。</p>
+<p>$$m = (m_0, m_1, \dotsm, m_{k-1})$$</p>
+<p>将每一份转换成对应的整数，比如每份 $16$ bits 时：</p>
+<p>$$\begin{aligned}<br>  0001\_0010\_1111\_1000_2 = 4856_{10}<br>\end{aligned}$$</p>
+<p>则签名为 </p>
+<p>$$\begin{aligned}<br>  \sigma<br>  &amp;= (\sigma_0, \sigma_1, \dotsm, \sigma_{k-1}) \\<br>  &amp;= (sk_{m_0}, sk_{m_1}, \dotsm, sk_{m_{k-1}})<br>\end{aligned} $$</p>
+<p>其中有可能<br>$$ \exists \ i, j \in [0, k-1], i \ne j, \sigma_i = \sigma_j $$</p>
+<p>图示：<br><img src="sign.svg"></p>
+<h2 id="消息校验-VER"><a href="#消息校验-VER" class="headerlink" title="消息校验($VER$)"></a>消息校验($VER$)</h2><p>$$ false/true \leftarrow VER(M, \sigma(M), pk) $$</p>
+<p>同样，将 $M$ 进行哈希之后，转换成 $k$ 个 $\tau$ bits 的整数</p>
+<p>$$m = (m_0, m_1, \dotsm, m_{k-1})$$</p>
+<p>计算出</p>
+<p>$$ pk^\prime = (pk^\prime_{m_0}, pk^\prime_{m_1}, \dotsm, pk^\prime_{m_{k-1}}) $$</p>
+<p>对于 $i \in [0,k-1]$，如果 $hash(\sigma_i) = pk^\prime_i$ 均成立，则校验成功，返回 $true$，否则校验失败，返回 $false$。</p>
+<p>图示：</p>
+<img src="verify.svg">]]></content>
+      <categories>
+        <category>Cryptography</category>
+      </categories>
+      <tags>
+        <tag>cryptography</tag>
+        <tag>signature</tag>
+        <tag>hash-based</tag>
+        <tag>FTS</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Lamport One Time Signature</title>
+    <url>/2021/12/24/cryptography/signature/lamport/</url>
+    <content><![CDATA[<p>Lamport 是<strong>第一个</strong> OTS(One Time Signature) 算法，由 <strong>Leslie Lamport</strong> 于 1979 年提出，论文可见 <a href="lamport-ots.pdf" target="_blank"> Constructing Digital Signatures from One Way Function</a> ，一对密钥只能签名一次，不能重复使用。</p>
+<p>下面按照 $(GEN, SIG, VER)$ 三元组描述该算法。</p>
+<h2 id="密钥生成-GEN"><a href="#密钥生成-GEN" class="headerlink" title="密钥生成($GEN$)"></a>密钥生成($GEN$)</h2><p>$$(pk, sk) \leftarrow GEN(1^k)$$</p>
+<p>首先我们需要确定安全参数 $k$，不过实际操作中我们一般只需要确定输出的摘要长度 $n$。</p>
+<p>通过随机数生成器(PRG, Pseudo Random Generator)，生成 $n$ 对随机数，每一对包含两个随机数，每一个随机数 $n$ bits，总共 $2\times n\times n$ bits，此为私钥。</p>
+<p>对<strong>每一个随机数</strong>进行哈希，生成 $2\times n$ 个摘要，每一个 $n$ bits，也是 $2 \times n \times n$ bits，此为公钥。</p>
+<p>形式化表示为：</p>
+<p>$$sk = (sk_{0,0}, sk_{0,1}, \dotsm, sk_{n-1, 0}, sk_{n-1, 1}) \\<br>pk = (pk_{0,0}, pk_{0,1}, \dotsm, pk_{n-1, 0}, pk_{n-1, 1})$$</p>
+<span id="more"></span>
+
+<p>图示：<br><img src="gen.svg"></p>
+<h2 id="消息签名-SIG"><a href="#消息签名-SIG" class="headerlink" title="消息签名($SIG$)"></a>消息签名($SIG$)</h2><p>$$ \sigma(M) \leftarrow SIG(M, sk)$$</p>
+<p>对于输入 $M \in \{0, 1\}^*$，首先使用哈希函数进行处理，生成 $n$ bits 的摘要。</p>
+<p>$$m = (m_0, m_1, \dotsm, m_{n-1})$$</p>
+<p>对于摘要中的每一个 bit，进行下面的操作：对于摘要中的第 $i$ 个 bit $m_i$，如果该 bit 为 0，那么取 $sk_{i,0}$，否则该 bit 位为 1，取 $sk_{i,1}$，最后签名为 </p>
+<p>$$\sigma =(\sigma_0, \sigma_1,\dotsm \sigma_{n-1}) = (sk_{0,m_0}, sk_{1,m_1}, \dotsm, sk_{n-1,m_{n-1}})$$</p>
+<p>比如说输入的 $M$ 经过哈希之后得到 </p>
+<p>$$(0,1,0,1,1,0,0,1)$$</p>
+<p>那么签名结果是 </p>
+<p>$$\sigma= (sk_{0,0}, sk_{1,1}, sk_{2,0},sk_{3,1},sk_{4,1},sk_{5,0},sk_{6,0},sk_{7,1})$$</p>
+<p>图示：<br><img src="sign.svg"></p>
+<h2 id="消息校验-VER"><a href="#消息校验-VER" class="headerlink" title="消息校验($VER$)"></a>消息校验($VER$)</h2><p>$$ false/true \leftarrow VER(M, \sigma(M), pk) $$</p>
+<p>对于消息 $M \in \{0,1\}^*$，首先进行哈希，得到 $n$ bits 的摘要。</p>
+<p>$$m = (m_0, m_1, \dotsm, m_{n-1})$$</p>
+<p>对于摘要中的每一个 bit，进行下面的操作：对于摘要中的第 $i$ 个 bit $m_i$，如果该 bit 为 0，那么取 $pk_{i,0}$，否则该 bit 位为 1，取 $pk_{i,1}$，最后得到</p>
+<p>$$v= (pk_{0,m_0}, pk_{1,m_1}, \dotsm, pk_{n-1,m_{n-1}})$$</p>
+<p>对于签名 $\sigma$ 中的每一个部分进行哈希，得到</p>
+<p>$$v^{\prime}= (pk_{0,m_0}^{\prime}, pk_{1,m_1}^{\prime}, \dotsm, pk_{n-1,m_{n-1}}^{\prime})$$</p>
+<p>如果 $v=v^{\prime}$，则签名校验通过，返回 $true$，否则校验失败，返回 $false$。</p>
+<p>图示：<br><img src="verify.svg"></p>
+]]></content>
+      <categories>
+        <category>Cryptography</category>
+      </categories>
+      <tags>
+        <tag>cryptography</tag>
+        <tag>signature</tag>
+        <tag>hash-based</tag>
+        <tag>OTS</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>签名算法</title>
+    <url>/2021/12/24/cryptography/signature/signature/</url>
+    <content><![CDATA[<h2 id="定义"><a href="#定义" class="headerlink" title="定义"></a>定义</h2><p>任意的签名算法都可以用一个三元组表示: ($GEN, SIG, VER$)，可以说是组成签名系统的三个算法。</p>
+<ul>
+<li>$GEN$: 密钥生成算法</li>
+<li>$SIG$: 消息签名算法</li>
+<li>$VER$: 消息校验算法</li>
+</ul>
+<p>定义一个接口表示： </p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">type</span> Signature <span class="keyword">interface</span> &#123;</span><br><span class="line">	<span class="comment">// GenerateKey generates secret key and public key</span></span><br><span class="line">	GenerateKey() (sk []<span class="keyword">byte</span>, pk []<span class="keyword">byte</span>)</span><br><span class="line">	<span class="comment">// Sign computes signature of message using secret key</span></span><br><span class="line">	Sign(message []<span class="keyword">byte</span>, sk []<span class="keyword">byte</span>) []<span class="keyword">byte</span></span><br><span class="line">	<span class="comment">// Verify check if the signature is valid</span></span><br><span class="line">	Verify(message []<span class="keyword">byte</span>, pk []<span class="keyword">byte</span>, signature []<span class="keyword">byte</span>) <span class="keyword">bool</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>下面详细说说这三个算法。</p>
+<span id="more"></span>
+
+<h2 id="密钥生成算法"><a href="#密钥生成算法" class="headerlink" title="密钥生成算法"></a>密钥生成算法</h2><p>形式化表示为：</p>
+<p>$$(pk, sk) \leftarrow GEN(1^k)$$</p>
+<p>其中，$k$ 是安全参数，wiki 上给出了详细的说明：</p>
+<blockquote>
+<p>In cryptography, the security parameter is a variable that measures the input size of the computational problem. Both the resource requirements of the cryptographic algorithm or protocol as well as the adversary’s probability of breaking security are expressed in terms of the security parameter.</p>
+</blockquote>
+<p>也就是相当于说，安全性参数可以表示出破坏该签名安全性的概率和需要的资源等。</p>
+<p>不过在实际中，我们可能会固定 $k$，比如为 256 等等。</p>
+<p>指定安全参数之后，调用该方法，系统可以生成一对密钥，其中包括一个私钥和公钥，公钥可以公布，但是私钥必须安全保存。</p>
+<h2 id="消息签名算法"><a href="#消息签名算法" class="headerlink" title="消息签名算法"></a>消息签名算法</h2><p>形式化表示为：<br>$$ \sigma(M) \leftarrow SIG(M, sk)$$</p>
+<p>输入需要签名的消息，以及生成的私钥，该算法可以输出消息的签名。</p>
+<h2 id="消息校验算法"><a href="#消息校验算法" class="headerlink" title="消息校验算法"></a>消息校验算法</h2><p>形式化表示为：<br>$$ false/true \leftarrow VER(M, \sigma(M), pk) $$</p>
+<p>输出消息，和对应需要校验的签名，然后输入公钥，该算法可以确定消息是否完整，并可以校验发布者的身份，因为只用该发布者私钥签名的数据，才能成功通过该公钥解密。</p>
+<h2 id="满足"><a href="#满足" class="headerlink" title="满足"></a>满足</h2><p>一个签名算法必须满足两个性质：</p>
+<ol>
+<li><strong>不可伪造性</strong>：其他用户不可能伪造签发者对数据进行签名。</li>
+<li><strong>正确性</strong>：通过上述三个步骤进行计算，输出结果一定为 $true$。</li>
+</ol>
+<h2 id="Hash-based-签名方案分类"><a href="#Hash-based-签名方案分类" class="headerlink" title="Hash-based 签名方案分类"></a>Hash-based 签名方案分类</h2><h3 id="One-Time-Signature-OTS"><a href="#One-Time-Signature-OTS" class="headerlink" title="One Time Signature (OTS)"></a>One Time Signature (OTS)</h3><p>$OTS$ 的每一个密钥对，只能用来签名一条消息，因为在签名完第一次消息之后，该密钥对不再安全，攻击方可以 <strong>100%</strong> 伪造签名。</p>
+<p>比如：<a href="">Lamport OTS</a>, <a href="">WOTS</a>.</p>
+<h3 id="Few-Times-Signature-FTS"><a href="#Few-Times-Signature-FTS" class="headerlink" title="Few Times Signature (FTS)"></a>Few Times Signature (FTS)</h3><p>$FTS$ 的每一个密钥对，可以用来签名多个消息，但是随着签名的次数增加，安全性会急剧下降。</p>
+<p>比如：<a href="">HORS</a>.</p>
+]]></content>
+      <categories>
+        <category>Cryptography</category>
+      </categories>
+      <tags>
+        <tag>cryptography</tag>
+        <tag>signature</tag>
+        <tag>hash-based</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Winternitz One Time Signature</title>
+    <url>/2021/12/24/cryptography/signature/wots/</url>
+    <content><![CDATA[<p>1979 年 <strong>Ralph C. Merkle</strong> 提出了 <strong>Winternitz-OTS</strong>，其中运用了哈希链(hash chain)的结构，论文见 <a href="a-certified-digital-signature.pdf" target="_blank">A Certified Digital Signature </a>，更加详细的算法描述见 <a href="hash-based-digital-signature-schemes.pdf" target="_blank">Hash-based Digital Signature Schemes</a>，该算法产生的一对密钥也只能签名一条消息。</p>
+<p>下面按照 $(GEN, SIG, VER)$ 三元组描述该算法。</p>
+<h2 id="密钥生成-GEN"><a href="#密钥生成-GEN" class="headerlink" title="密钥生成($GEN$)"></a>密钥生成($GEN$)</h2><p>$$(pk, sk) \leftarrow GEN(1^k)$$</p>
+<p>首先，我们需要确定 $w$ 参数该参数决定哈希私钥多少次构造公钥，此外还需确定哈希之后摘要的长度 $n$ ，或者可以认为是采用的哈希函数族。</p>
+<span id="more"></span>
+
+<p>一般情况下，我们要求：$w|n , w | 8$ ， 这将极大的简化之后的代码编写。</p>
+<p>计算：</p>
+<p>$$ l_1 = \lceil \frac{n}{w}\rceil,\ l_2 = \lfloor \frac{\log(l_1(2^w-1))}{w} \rfloor + 1 ,\ l = l_1 + l_2 $$</p>
+<div style="font-size:12px;margin-bottom:10px;text-align:center">注: 这里采用 <a href="https://link.springer.com/chapter/10.1007/978-3-662-46800-5_15" target="_blank">SPHINCS</a> 中的计算公式，结果一致</div>
+
+<p>通过 $PRG$ 生成 $l$ 个 $n$ bits 的随机数，即为私钥：</p>
+<p>$$sk = (sk_0, sk_1, \dotsm, sk_{l-1})$$</p>
+<p>对 $l$ 个随机数哈希 $2^w-1$ 次</p>
+<p>$$pk_i = hash^{2^w-1}(sk_i)$$</p>
+<p>组合即为公钥：</p>
+<p>$$pk = (pk_0, pk_1, \dotsm, pk_{l-1})$$</p>
+<p>图示：<br><img src="gen.svg"></p>
+<h2 id="消息签名-SIG"><a href="#消息签名-SIG" class="headerlink" title="消息签名($SIG$)"></a>消息签名($SIG$)</h2><p>$$ \sigma(M) \leftarrow SIG(M, sk)$$</p>
+<p>计算消息 $M \in \{0, 1\}^*$ 的摘要 $m \in \{0,1\}^n$，这 $n$ bits 进行填充，使其能够被 $w$ 整除，分成 $l_1$ 份，每一份 $w$ bits。</p>
+<p>因为上面我们提到，要求 $w\mid n$，所以我们也可以认为，每一份 $w$ bits, 共 $l_1 = \frac{n}{w}$ 份。</p>
+<p>$$m = (m_0,m_1,\dotsm,m_{l_1-1})$$</p>
+<p>上述的每 $w$ bits 表示的 $m_i, i \in [0, l_1-1]$ 都可以表示一个整数，比如说 $w$ 为 4，$m_0$ 为 $1001_2$，则其表示 $9_{10}$</p>
+<p>接下来计算校验和(Checksum)</p>
+<p>$$C = \sum^{l_1}_{i=1}(2^w-1-m_i) \le l_1(2^w-1)$$</p>
+<p>将 $C$ 同样表示每部分 $w$ bits，或者说转换成以 $w$ 为基的数字。</p>
+<p>$$c = (c_0, c_1, \dotsm, c_{l_2-1})$$</p>
+<p>设<br>$$b = (b_0, b_1, \dotsm, b_{l-1}) = m || c$$</p>
+<p>即 $b$ 为 $m$ 和 $c$ 的串接。</p>
+<p>则签名 </p>
+<p>$$\begin{aligned}<br>  \sigma &amp;= (\sigma_0, \sigma_1, \dotsm, \sigma_{l-1}) \\<br>&amp;= (hash^{b_0}(sk_0), hash^{b_1}(sk_1), \dotsm, hash^{b_{l-1}}(sk_{l-1}))<br>\end{aligned}$$</p>
+<p>图示：<br><img src="sign.svg"></p>
+<h2 id="消息校验-VER"><a href="#消息校验-VER" class="headerlink" title="消息校验($VER$)"></a>消息校验($VER$)</h2><p>$$ false/true \leftarrow VER(M, \sigma(M), pk) $$</p>
+<p>通过上述同样的方式将消息 $M$ 转换成 </p>
+<p>$$b = (b_0, b_1, \dotsm, b_{l-1})$$</p>
+<p>将传递过来的签名<br>$$\sigma = (\sigma_0, \sigma_1, \dotsm, \sigma_{l-1})$$</p>
+<p>进行如下处理，得到 $pk^\prime$</p>
+<p>$$\begin{aligned}<br>  pk^\prime &amp;= (pk^\prime_0, pk^\prime_1, \dotsm, pk ^\prime_{l-1}) \\<br>  &amp;= (hash^{2^w-1-b_0}(\sigma_0), hash^{2^w-1-b_1}(\sigma_1), \dotsm,hash^{2^w-1-b_{l-1}}(\sigma_{l-1}))<br>\end{aligned}$$</p>
+<p>和公钥 </p>
+<p>$$pk = (pk_0, pk_1, \dotsm, pk_{l-1})$$</p>
+<p>进行匹配，如果 $pk = pk^\prime$ 则校验通过，返回 $true$，否则返回 $false$</p>
+<p>图示：<br><img src="verify.svg"></p>
+]]></content>
+      <categories>
+        <category>Cryptography</category>
+      </categories>
+      <tags>
+        <tag>cryptography</tag>
+        <tag>signature</tag>
+        <tag>hash-based</tag>
+        <tag>OTS</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Golang 报错 package xxx is not in GOROOT or GOPATH 或者 cannot find package “xxx“ in any of</title>
+    <url>/2020/07/11/golang/fundamental/import-package/</url>
+    <content><![CDATA[<h2 id="GO111MODULE-”off”"><a href="#GO111MODULE-”off”" class="headerlink" title="GO111MODULE=”off”"></a>GO111MODULE=”off”</h2><p>在 <code>GO111MODULE=&quot;off&quot;</code> 的条件下，并且写的代码不在 <code>$GOPATH/src</code> 下，也就是说下面的 <code>main.go</code> 不在<code>$GOPATH/src</code> 目录下面，同时我想要使用当前项目目录下的另一个 <code>module</code> 里面的可导出标识符(函数、变量等)，但是这个模块 <code>不是标准库</code>，或者说不在 GOROOT 里(一般我们不会修改 GOROOT 中的内容)</p>
+<span id="more"></span>
+
+<img src="structure.png">
+
+<p>运行代码会报错</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">main.go:4:2: cannot find package &quot;module&quot; in any of:</span><br><span class="line">        /usr/local/go/src/module (from $GOROOT)</span><br><span class="line">        /home/linux/go/src/module (from $GOPATH)</span><br></pre></td></tr></table></figure>
+
+<h3 id="解决方案-设置-GOPATH"><a href="#解决方案-设置-GOPATH" class="headerlink" title="解决方案: 设置 GOPATH"></a>解决方案: 设置 <code>GOPATH</code></h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go env -w GOPATH=~/<span class="built_in">test</span></span><br><span class="line"><span class="comment"># 这里设置为 ~/test是因为我需要在~/test/src下面写代码</span></span><br></pre></td></tr></table></figure>
+
+<p>然后在 <code>$GOPATH/src</code> 目录下写</p>
+<img src="1.png">
+
+<p>go 的编译器会在 <code>$GOPATH/src</code> 下面寻找对应的模块，src 下的每一个目录都可以对应一个模块，目录中的目录也可以是一个模块，如果，我们需要访问一个嵌套目录中的模块，比如下图</p>
+<img src="2.png" >
+
+<p>我们需要调用 module 目录中的 moduleA 模块，只需要使用</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;module/moduleA&quot;</span></span><br></pre></td></tr></table></figure>
+
+<h3 id="动图演示"><a href="#动图演示" class="headerlink" title="动图演示"></a>动图演示</h3><img src="gopath.gif">
+
+<hr/>
+
+<h2 id="GO111MODULE-”on”"><a href="#GO111MODULE-”on”" class="headerlink" title="GO111MODULE=”on”"></a>GO111MODULE=”on”</h2><p>在 <code>GO111MODULE=&quot;on&quot;</code> 的条件下，我们直接调用写好的模块，如下图所示</p>
+<img src="3.png">
+
+<p>会直接报错</p>
+<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">main.go:4:2: package module is not in GOROOT (/usr/local/go/src/module)</span><br></pre></td></tr></table></figure>
+
+<h3 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h3><ul>
+<li>第一种方式：设置 <code>GO111MODULE=&quot;off&quot;</code>，然后像上面的那种方式一样设置 <code>GOPATH</code></li>
+<li>第二种方式：使用 <code>go mod</code>，如下</li>
+</ul>
+<img src="4.png">
+
+<p>首先我们需要初始化一个 <code>go.mod</code> ，使用</p>
+<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go mod init <span class="built_in">test</span></span><br><span class="line"><span class="comment"># test可以是任意的名称</span></span><br></pre></td></tr></table></figure>
+
+<p>然后我们引入模块的时候，以 <code>test</code> (初始化时定义)开头，然后接模块路径，比如</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;test/module&quot;</span></span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>如果使用这种方式 Goland 报错，但是可以进行正常编译，那么可以删除当前目录下的 <code>.idea</code> 目录然后重启项目即可</p>
+</blockquote>
+<p>如果我们想要引用嵌套模块也是一样的</p>
+<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;test/module/moduleA&quot;</span></span><br></pre></td></tr></table></figure>
+
+<img src="5.png">
+
+<h3 id="动图演示-1"><a href="#动图演示-1" class="headerlink" title="动图演示"></a>动图演示</h3><img src="gomod.gif">]]></content>
+      <categories>
+        <category>Golang</category>
+      </categories>
+      <tags>
+        <tag>Go</tag>
+        <tag>package</tag>
+        <tag>fundamental</tag>
       </tags>
   </entry>
   <entry>
@@ -1076,184 +1555,6 @@
       </tags>
   </entry>
   <entry>
-    <title>Docker 基本使用</title>
-    <url>/2021/07/10/docker/basic/</url>
-    <content><![CDATA[<p><code>Docker</code> 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。</p>
-<p>下面介绍一下基本使用：</p>
-<h2 id="从一个Hello-world开始"><a href="#从一个Hello-world开始" class="headerlink" title="从一个Hello world开始"></a>从一个Hello world开始</h2><p>Docker 可以允许你在容器中运行应用程序，使用 <code>docker run</code> 可以在容器中运行一个应用程序。</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run ubuntu:18.04 /bin/<span class="built_in">echo</span> <span class="string">&quot;Hello world&quot;</span></span><br></pre></td></tr></table></figure>
-
-<ul>
-<li><code>run</code>: 表示运行一个容器</li>
-<li><code>ubuntu:18.04</code>: 指定要运行的镜像，Docker 首先在本地主机上查找对应的镜像是否存在，如果不存在的话，那么会从远程镜像仓库 <code>Docker Hub</code> 中下载公共镜像，如果没有指定后面的 TAG，那么默认情况下使用的是 latest</li>
-<li><code>/bin/echo &quot;Hello world&quot;</code>: 在启动的容器中执行的命令</li>
-</ul>
-<span id="more"></span>
-
-<p>运行完上面的命令之后，我们会下载一个 <code>ubuntu</code> 镜像，并且创建一个容器，使用下面的命令可以查看所有的镜像文件</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
-
-<p>如果我们不需要这些容器了，我们可以使用下面命令进行删除</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># container 指的是容器的ID或者NAME，可以一次性删除多个</span></span><br><span class="line">docker rm container [container...]</span><br></pre></td></tr></table></figure>
-
-<h3 id="运行交互式容器"><a href="#运行交互式容器" class="headerlink" title="运行交互式容器"></a>运行交互式容器</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -i -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># -i -t 可以合并为-it</span></span><br></pre></td></tr></table></figure>
-
-<ul>
-<li><code>-t</code>: 在新容器中指令一个伪终端或终端</li>
-<li><code>-i:</code> 允许对容器中的标准输入(stdin)进行交互</li>
-</ul>
-<p>输入<code>exit</code>可以退出当前容器</p>
-<h3 id="运行后台模式容器"><a href="#运行后台模式容器" class="headerlink" title="运行后台模式容器"></a>运行后台模式容器</h3><p>使用下面的命令可以创建一个以进程方式运行的容器</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d ubuntu:18.04 /bin/sh -c <span class="string">&quot;while true; do echo hello world; sleep 1; done&quot;</span></span><br></pre></td></tr></table></figure>
-
-<p>运行完上面的命令之后会输出一串字符串，表示的是这个 <code>容器ID</code></p>
-<h2 id="容器使用"><a href="#容器使用" class="headerlink" title="容器使用"></a>容器使用</h2><h4 id="获取镜像"><a href="#获取镜像" class="headerlink" title="获取镜像"></a>获取镜像</h4><p>如果本地没有镜像，那么可以使用下面的命令获取 <code>ubuntu</code> 镜像</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker pull ubuntu</span><br></pre></td></tr></table></figure>
-
-<h4 id="启动容器"><a href="#启动容器" class="headerlink" title="启动容器"></a>启动容器</h4><p>使用下面命令启动一个容器，并且以命令行模式进入该容器</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -it ubuntu /bin/bash</span><br><span class="line"><span class="comment"># 默认使用的就是 /bin/bash</span></span><br></pre></td></tr></table></figure>
-
-<p>使用 <code>exit</code> 可退出终端</p>
-<h4 id="后台运行"><a href="#后台运行" class="headerlink" title="后台运行"></a>后台运行</h4><p>在大部分的场景下，我们希望 <code>docker</code> 的服务是在后台运行的，使用 <code>-d</code> 参数指定容器以 <code>守护进程</code> 的形式运行</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name ubuntu-test ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
-
-<h4 id="启动、停止容器"><a href="#启动、停止容器" class="headerlink" title="启动、停止容器"></a>启动、停止容器</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker stop container</span><br><span class="line"><span class="comment"># 启动一个已经停止的容器</span></span><br><span class="line">docker start container</span><br><span class="line"><span class="comment"># 重启一个容器</span></span><br><span class="line">docker restart container</span><br></pre></td></tr></table></figure>
-
-<h4 id="进入容器"><a href="#进入容器" class="headerlink" title="进入容器"></a>进入容器</h4><p>在使用 <code>-d</code> 参数时，容器启动会进入后台，此时如果想要进入容器，可以使用下面的指令进入</p>
-<ul>
-<li><code>docker attach container</code></li>
-<li><code>docker exec container</code><blockquote>
-<p>推荐使用 docker exec，因为使用这个方式退出终端之后不会导致容器的停止</p>
-</blockquote>
-</li>
-</ul>
-<p>使用 <code>docker exec</code> 的时候需要指定运行的命令，比如</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker <span class="built_in">exec</span> -it 243c32535da7 /bin/bash</span><br></pre></td></tr></table></figure>
-
-<p>而使用 <code>docker attach</code> 的时候会直接进行上一次的命令</p>
-<h4 id="删除容器"><a href="#删除容器" class="headerlink" title="删除容器"></a>删除容器</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker rm container</span><br></pre></td></tr></table></figure>
-
-<p>删除容器的时候必须是停止状态</p>
-<h4 id="查看网络端口映射"><a href="#查看网络端口映射" class="headerlink" title="查看网络端口映射"></a>查看网络端口映射</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line"><span class="comment"># PORTS信息中有</span></span><br><span class="line">docker ps</span><br><span class="line"></span><br><span class="line"><span class="comment"># 查看指定容器的端口映射</span></span><br><span class="line">docker port container</span><br></pre></td></tr></table></figure>
-
-<h4 id="查看容器日志"><a href="#查看容器日志" class="headerlink" title="查看容器日志"></a>查看容器日志</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker logs container</span><br></pre></td></tr></table></figure>
-
-<h4 id="查看容器的进程"><a href="#查看容器的进程" class="headerlink" title="查看容器的进程"></a>查看容器的进程</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker top container</span><br></pre></td></tr></table></figure>
-
-<h4 id="检查容器"><a href="#检查容器" class="headerlink" title="检查容器"></a>检查容器</h4><p>输出容器的一系列信息</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker inspect container</span><br></pre></td></tr></table></figure>
-
-<h3 id="Docker-镜像使用"><a href="#Docker-镜像使用" class="headerlink" title="Docker 镜像使用"></a>Docker 镜像使用</h3><p>当运行容器的时候，如果使用的容器本地不存在，那么 <code>docker</code> 会自动从镜像仓库中下载，默认是 <code>Docker Hub</code> 公共镜像源</p>
-<h4 id="列出所有镜像列表"><a href="#列出所有镜像列表" class="headerlink" title="列出所有镜像列表"></a>列出所有镜像列表</h4><figure class="highlight go"><table><tr><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
-
-<h4 id="获取一个新的镜像"><a href="#获取一个新的镜像" class="headerlink" title="获取一个新的镜像"></a>获取一个新的镜像</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker pull ubuntu:18.04</span><br></pre></td></tr></table></figure>
-
-<h4 id="查找镜像"><a href="#查找镜像" class="headerlink" title="查找镜像"></a>查找镜像</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker search xxx</span><br></pre></td></tr></table></figure>
-
-<h4 id="删除镜像"><a href="#删除镜像" class="headerlink" title="删除镜像"></a>删除镜像</h4><p>镜像的删除使用 docker rmi 命令</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker rmi imageName</span><br></pre></td></tr></table></figure>
-
-<h4 id="设置镜像标签"><a href="#设置镜像标签" class="headerlink" title="设置镜像标签"></a>设置镜像标签</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker tag container xxx:xxx</span><br></pre></td></tr></table></figure>
-
-<h3 id="Docker-容器网络连接"><a href="#Docker-容器网络连接" class="headerlink" title="Docker 容器网络连接"></a>Docker 容器网络连接</h3><p>容器中可以运行一些网络应用，要想让外部也可以访问里面的这些应用，那么可以通过 <code>-P</code> 或者 <code>-p</code> 参数来指定端口映射</p>
-<h4 id="网络端口映射"><a href="#网络端口映射" class="headerlink" title="网络端口映射"></a>网络端口映射</h4><p>比如说运行一个 python 应用</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d -P webapp python app.py</span><br><span class="line"><span class="comment"># 将容器内容的5000(2)端口映射到宿主机的5000(1)端口</span></span><br><span class="line">docker run -d -p 5000:5000 webapp python app.py</span><br></pre></td></tr></table></figure>
-
-<ul>
-<li><code>-P</code>: 容器里面的端口随机映射到主机端口</li>
-<li><code>-p</code>: 容器内部端口绑定到指定的主机端口</li>
-<li>端口进行映射之后，我们可以使用 <code>docker ps</code> 或者 <code>docker port container</code> 进行查看对应的端口映射关系</li>
-</ul>
-<p>默认情况下绑定的都是 <code>tcp</code> 端口，如果要绑定 <code>udp</code> 端口，可以再端口后面加 <code>/udp</code></p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d -p 127.0.0.1:5000:5000/udp webapp python app.py</span><br></pre></td></tr></table></figure>
-
-<h4 id="Docker-容器互联"><a href="#Docker-容器互联" class="headerlink" title="Docker 容器互联"></a>Docker 容器互联</h4><p>端口映射不是唯一的将 <code>docker</code> 连接到另一个容器的方法<br><code>docker</code> 有一个连接系统允许将多个容器连接在一起，共享连接信息<br><code>docker</code> 连接会创建一个父子关系，其中父容器可以看到子容器的信息</p>
-<h5 id="端口命名"><a href="#端口命名" class="headerlink" title="端口命名"></a>端口命名</h5><p>当我们创建一个容器的时候，docker 会自动对它进行命名，我们可以使用 <code>--name</code> 参数来自定义命名</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -d --name ubuntu -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># 下面方法可以修改一个container的name</span></span><br><span class="line">docker rename container NEW_NAME</span><br></pre></td></tr></table></figure>
-
-<h4 id="新建网络"><a href="#新建网络" class="headerlink" title="新建网络"></a>新建网络</h4><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker network</span><br></pre></td></tr></table></figure>
-
-<p>eg:</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker network create -d bridge test-net</span><br><span class="line"><span class="comment"># -d 表示新建网络内省，有bridge, overlay</span></span><br></pre></td></tr></table></figure>
-
-<h4 id="连接容器"><a href="#连接容器" class="headerlink" title="连接容器"></a>连接容器</h4><p>运行一个容器并连接到新建的网络中</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name test1 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
-
-<p>然后在打开一个新的终端运行一个容器并加入到 test-net 网络中</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker run -itd --name test2 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
-
-<p>然后可以在容器之间进行 ping</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">ping test1  <span class="comment"># test2内</span></span><br><span class="line">ping test2  <span class="comment"># test1内</span></span><br></pre></td></tr></table></figure>
-
-<h2 id="Dockerfile"><a href="#Dockerfile" class="headerlink" title="Dockerfile"></a>Dockerfile</h2><p>Dockerfile 可以用来构建一个镜像，文本内容包含了一条条构建镜像所需要的指令和说明</p>
-<h3 id="使用-Dockerfile-定制镜像"><a href="#使用-Dockerfile-定制镜像" class="headerlink" title="使用 Dockerfile 定制镜像"></a>使用 Dockerfile 定制镜像</h3><figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">FROM</span> node</span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> . /server</span></span><br><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> /server</span></span><br><span class="line"><span class="keyword">RUN</span><span class="bash"> npm install --production</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">EXPOSE</span> <span class="number">3001</span></span><br><span class="line"><span class="keyword">ENTRYPOINT</span><span class="bash"> [ <span class="string">&quot;npm&quot;</span>, <span class="string">&quot;run&quot;</span>, <span class="string">&quot;start&quot;</span>]</span></span><br></pre></td></tr></table></figure>
-
-<p><code>FROM</code> 指定使用哪一个镜像源<br><code>RUN</code> 指定要执行的命令<br><code>COPY</code> 执行相应的复制操作</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker build -t centos:6.7 DockerfilePath</span><br></pre></td></tr></table></figure>
-
-<ul>
-<li><code>-t</code>: 指定创建的目标镜像名</li>
-<li><code>DockerfilePath</code>: 指定需要使用的 <code>Dockerfile</code> 文件，也可以指定所在目录，但是这样目录中的构建文件名必须是 <code>Dockerfile</code></li>
-</ul>
-<h3 id="构建镜像"><a href="#构建镜像" class="headerlink" title="构建镜像"></a>构建镜像</h3><p>在 Dockerfile 文件的存放目录下，执行构建动作</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">docker build -t nginx:v3 .</span><br></pre></td></tr></table></figure>
-
-<p><code>.</code>, 上下文路径， 可以用 Dockerfile 的路径来代替，也可以使用目录，只不过构建文件名必须为 Dockerfile</p>
-<h3 id="指令详解"><a href="#指令详解" class="headerlink" title="指令详解"></a>指令详解</h3><h4 id="COPY"><a href="#COPY" class="headerlink" title="COPY"></a>COPY</h4><p>复制指令，从上下文目录中复制文件或者目录到容器里指定路径。</p>
-<p>格式：</p>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="bash"> [--chown=&lt;user&gt;:&lt;group&gt;] &lt;源路径1&gt;...  &lt;目标路径&gt;</span></span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> [--chown=&lt;user&gt;:&lt;group&gt;] [<span class="string">&quot;&lt;源路径1&gt;&quot;</span>,...  <span class="string">&quot;&lt;目标路径&gt;&quot;</span>]</span></span><br></pre></td></tr></table></figure>
-
-<p><code>--chown=</code>：可选参数，用户改变复制到容器内文件的拥有者和属组。</p>
-<p><code>源路径</code>：源文件或者源目录，这里可以是通配符表达式，其通配符规则要满足 Go 的 filepath.Match 规则。例如：</p>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="bash"> hom* /mydir/</span></span><br><span class="line"><span class="keyword">COPY</span><span class="bash"> hom?.txt /mydir/</span></span><br></pre></td></tr></table></figure>
-
-<p><code>&lt;目标路径&gt;</code>：容器内的指定路径，该路径不用事先建好，路径不存在的话，会自动创建。</p>
-<h4 id="ADD"><a href="#ADD" class="headerlink" title="ADD"></a>ADD</h4><p>ADD 指令和 COPY 的使用格式一致（同样需求下，官方推荐使用 COPY）。功能也类似，不同之处如下：</p>
-<ul>
-<li>ADD 的优点：在执行 &lt;源文件&gt; 为 tar 压缩文件的话，压缩格式为 gzip, bzip2 以及 xz 的情况下，会自动复制并解压到 &lt;目标路径&gt;。</li>
-<li>ADD 的缺点：在不解压的前提下，无法复制 tar 压缩文件。会令镜像构建缓存失效，从而可能会令镜像构建变得比较缓慢。具体是否使用，可以根据是否需要自动解压来决定。</li>
-</ul>
-<h4 id="CMD"><a href="#CMD" class="headerlink" title="CMD"></a>CMD</h4><p>类似于 RUN 指令，用于运行程序，但二者运行的时间点不同:</p>
-<ul>
-<li>CMD 在 <code>docker run</code> 时运行。</li>
-<li>RUN 是在<code>docker build</code>。</li>
-</ul>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">CMD</span><span class="bash"> &lt;shell 命令&gt;</span></span><br><span class="line"><span class="keyword">CMD</span><span class="bash"> [<span class="string">&quot;&lt;可执行文件或命令&gt;&quot;</span>,<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]</span></span><br><span class="line"><span class="keyword">CMD</span><span class="bash"> [<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]  <span class="comment"># 该写法是为 ENTRYPOINT 指令指定的程序提供默认参数</span></span></span><br></pre></td></tr></table></figure>
-
-<p>推荐使用第二种格式，执行过程比较明确。第一种格式实际上在运行的过程中也会自动转换成第二种格式运行，并且默认可执行文件是 sh。</p>
-<h4 id="ENV"><a href="#ENV" class="headerlink" title="ENV"></a>ENV</h4><p>设置环境变量，定义了环境变量，那么在后续的指令中，就可以使用这个环境变量。</p>
-<p>格式：</p>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">ENV</span> &lt;key&gt; &lt;value&gt;</span><br><span class="line"><span class="keyword">ENV</span> &lt;key1&gt;=&lt;value1&gt; &lt;key2&gt;=&lt;value2&gt;...</span><br></pre></td></tr></table></figure>
-
-<h4 id="EXPOSE"><a href="#EXPOSE" class="headerlink" title="EXPOSE"></a>EXPOSE</h4><p>声明端口</p>
-<p>作用：</p>
-<ul>
-<li>帮助镜像使用者理解这个镜像服务的守护端口，以方便配置映射。</li>
-<li>在运行时使用随机端口映射时，也就是 docker run -P 时，会自动随机映射 EXPOSE 的端口。</li>
-</ul>
-<p>格式：</p>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">EXPOSE</span> &lt;端口<span class="number">1</span>&gt; [&lt;端口<span class="number">2</span>&gt;...]</span><br></pre></td></tr></table></figure>
-
-<h4 id="WORKDIR"><a href="#WORKDIR" class="headerlink" title="WORKDIR"></a>WORKDIR</h4><p>指定工作目录。用 <code>WORKDIR</code> 指定的工作目录，会在构建镜像的每一层中都存在。（<code>WORKDIR</code> 指定的工作目录，必须是提前创建好的）。</p>
-<p><code>docker build</code> 构建镜像过程中的，每一个 <code>RUN</code> 命令都是新建的一层。只有通过 <code>WORKDIR</code> 创建的目录才会一直存在。</p>
-<p>格式：</p>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">WORKDIR</span><span class="bash"> &lt;工作目录路径&gt;</span></span><br></pre></td></tr></table></figure>
-
-<h4 id="USER"><a href="#USER" class="headerlink" title="USER"></a>USER</h4><p>用于指定执行后续命令的用户和用户组，这边只是切换后续命令执行的用户（用户和用户组必须提前已经存在）。</p>
-<p>格式：</p>
-<figure class="highlight dockerfile"><table><tr><td class="code"><pre><span class="line"><span class="keyword">USER</span> &lt;用户名&gt;[:&lt;用户组&gt;]</span><br></pre></td></tr></table></figure>
-
-
-]]></content>
-      <categories>
-        <category>docker</category>
-      </categories>
-      <tags>
-        <tag>docker</tag>
-        <tag>container</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>Gin 快速上手</title>
     <url>/2021/07/22/golang/framework/gin/basic/</url>
     <content><![CDATA[<p>使用 Go 搭建 Web 后端，最简单的就是使用原生的 <code>net/http</code> 库了，下面是一个简单的例子:</p>
@@ -1322,68 +1623,6 @@
         <tag>Go</tag>
         <tag>framework</tag>
         <tag>Gin</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>Golang 报错 package xxx is not in GOROOT or GOPATH 或者 cannot find package “xxx“ in any of</title>
-    <url>/2020/07/11/golang/fundamental/import-package/</url>
-    <content><![CDATA[<h2 id="GO111MODULE-”off”"><a href="#GO111MODULE-”off”" class="headerlink" title="GO111MODULE=”off”"></a>GO111MODULE=”off”</h2><p>在 <code>GO111MODULE=&quot;off&quot;</code> 的条件下，并且写的代码不在 <code>$GOPATH/src</code> 下，也就是说下面的 <code>main.go</code> 不在<code>$GOPATH/src</code> 目录下面，同时我想要使用当前项目目录下的另一个 <code>module</code> 里面的可导出标识符(函数、变量等)，但是这个模块 <code>不是标准库</code>，或者说不在 GOROOT 里(一般我们不会修改 GOROOT 中的内容)</p>
-<span id="more"></span>
-
-<img src="structure.png">
-
-<p>运行代码会报错</p>
-<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">main.go:4:2: cannot find package &quot;module&quot; in any of:</span><br><span class="line">        /usr/local/go/src/module (from $GOROOT)</span><br><span class="line">        /home/linux/go/src/module (from $GOPATH)</span><br></pre></td></tr></table></figure>
-
-<h3 id="解决方案-设置-GOPATH"><a href="#解决方案-设置-GOPATH" class="headerlink" title="解决方案: 设置 GOPATH"></a>解决方案: 设置 <code>GOPATH</code></h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go env -w GOPATH=~/<span class="built_in">test</span></span><br><span class="line"><span class="comment"># 这里设置为 ~/test是因为我需要在~/test/src下面写代码</span></span><br></pre></td></tr></table></figure>
-
-<p>然后在 <code>$GOPATH/src</code> 目录下写</p>
-<img src="1.png">
-
-<p>go 的编译器会在 <code>$GOPATH/src</code> 下面寻找对应的模块，src 下的每一个目录都可以对应一个模块，目录中的目录也可以是一个模块，如果，我们需要访问一个嵌套目录中的模块，比如下图</p>
-<img src="2.png" >
-
-<p>我们需要调用 module 目录中的 moduleA 模块，只需要使用</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;module/moduleA&quot;</span></span><br></pre></td></tr></table></figure>
-
-<h3 id="动图演示"><a href="#动图演示" class="headerlink" title="动图演示"></a>动图演示</h3><img src="gopath.gif">
-
-<hr/>
-
-<h2 id="GO111MODULE-”on”"><a href="#GO111MODULE-”on”" class="headerlink" title="GO111MODULE=”on”"></a>GO111MODULE=”on”</h2><p>在 <code>GO111MODULE=&quot;on&quot;</code> 的条件下，我们直接调用写好的模块，如下图所示</p>
-<img src="3.png">
-
-<p>会直接报错</p>
-<figure class="highlight plaintext"><table><tr><td class="code"><pre><span class="line">main.go:4:2: package module is not in GOROOT (/usr/local/go/src/module)</span><br></pre></td></tr></table></figure>
-
-<h3 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h3><ul>
-<li>第一种方式：设置 <code>GO111MODULE=&quot;off&quot;</code>，然后像上面的那种方式一样设置 <code>GOPATH</code></li>
-<li>第二种方式：使用 <code>go mod</code>，如下</li>
-</ul>
-<img src="4.png">
-
-<p>首先我们需要初始化一个 <code>go.mod</code> ，使用</p>
-<figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">go mod init <span class="built_in">test</span></span><br><span class="line"><span class="comment"># test可以是任意的名称</span></span><br></pre></td></tr></table></figure>
-
-<p>然后我们引入模块的时候，以 <code>test</code> (初始化时定义)开头，然后接模块路径，比如</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;test/module&quot;</span></span><br></pre></td></tr></table></figure>
-
-<blockquote>
-<p>如果使用这种方式 Goland 报错，但是可以进行正常编译，那么可以删除当前目录下的 <code>.idea</code> 目录然后重启项目即可</p>
-</blockquote>
-<p>如果我们想要引用嵌套模块也是一样的</p>
-<figure class="highlight go"><table><tr><td class="code"><pre><span class="line"><span class="keyword">import</span> <span class="string">&quot;test/module/moduleA&quot;</span></span><br></pre></td></tr></table></figure>
-
-<img src="5.png">
-
-<h3 id="动图演示-1"><a href="#动图演示-1" class="headerlink" title="动图演示"></a>动图演示</h3><img src="gomod.gif">]]></content>
-      <categories>
-        <category>Golang</category>
-      </categories>
-      <tags>
-        <tag>Go</tag>
-        <tag>package</tag>
-        <tag>fundamental</tag>
       </tags>
   </entry>
 </search>
