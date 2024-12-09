@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>SPHINCS - Edgar&#039;s Blog</title><link rel="manifest" href="/manifest.json"><meta name="application-name" content="Edgar&#039;s Blog"><meta name="msapplication-TileImage" content="/images/favicon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Edgar&#039;s Blog"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="SPHINCS 于 2015 年由 Bernstein, Daniel J., Daira Hopwood, Andreas Hülsing 等人提出，具体的论文见 SPHINCS: practical stateless hash-based signatures。 SPHINCS 是一个无状态的签名系统。有状态指的是每次签名时需要记录系统的信息，比如是第几次签名，在验证的时候需要使用该参数，而"><meta property="og:type" content="blog"><meta property="og:title" content="SPHINCS"><meta property="og:url" content="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/"><meta property="og:site_name" content="Edgar&#039;s Blog"><meta property="og:description" content="SPHINCS 于 2015 年由 Bernstein, Daniel J., Daira Hopwood, Andreas Hülsing 等人提出，具体的论文见 SPHINCS: practical stateless hash-based signatures。 SPHINCS 是一个无状态的签名系统。有状态指的是每次签名时需要记录系统的信息，比如是第几次签名，在验证的时候需要使用该参数，而"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/sphincs_structure.png"><meta property="og:image" content="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/address.svg"><meta property="og:image" content="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/gen.svg"><meta property="og:image" content="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/sign.svg"><meta property="og:image" content="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/verify.svg"><meta property="article:published_time" content="2022-01-15T03:18:00.000Z"><meta property="article:modified_time" content="2024-12-08T15:52:33.788Z"><meta property="article:author" content="Edgar"><meta property="article:tag" content="cryptography"><meta property="article:tag" content="signature"><meta property="article:tag" content="hash-based"><meta property="article:tag" content="stateless"><meta property="twitter:card" content="summary"><meta property="twitter:image" content="sphincs_structure.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/"},"headline":"SPHINCS","image":["https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/sphincs_structure.png"],"datePublished":"2022-01-15T03:18:00.000Z","dateModified":"2024-12-08T15:52:33.788Z","author":{"@type":"Person","name":"Edgar"},"publisher":{"@type":"Organization","name":"Edgar's Blog","logo":{"@type":"ImageObject","url":{"text":"Edgar's Blog"}}},"description":"SPHINCS 于 2015 年由 Bernstein, Daniel J., Daira Hopwood, Andreas Hülsing 等人提出，具体的论文见 SPHINCS: practical stateless hash-based signatures。 SPHINCS 是一个无状态的签名系统。有状态指的是每次签名时需要记录系统的信息，比如是第几次签名，在验证的时候需要使用该参数，而"}</script><link rel="canonical" href="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/"><link rel="icon" href="/images/favicon.png"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.2/css/all.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@9.12.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link rel="stylesheet" href="/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><script>var _hmt = _hmt || [];
+        (function() {
+            var hm = document.createElement("script");
+            hm.src = "//hm.baidu.com/hm.js?5f7f74178f594a205a613901bcef33d1";
+            var s = document.getElementsByTagName("script")[0];
+            s.parentNode.insertBefore(hm, s);
+        })();</script><!--!--><script src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js" defer></script><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><meta name="generator" content="Hexo 5.4.2"></head><body class="is-3-column"><nav class="navbar navbar-main"><div class="container"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5895878473779987" crossorigin="anonymous"></script><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/">Edgar&#039;s Blog</a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/">首页</a><a class="navbar-item" href="/archives">归档</a><a class="navbar-item" href="/categories">分类</a><a class="navbar-item" href="/tags">标签</a><a class="navbar-item" href="/about">关于</a></div><div class="navbar-end"><a class="navbar-item is-hidden-tablet catalogue" title="目录" href="javascript:;"><i class="fas fa-list-ul"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-6-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2022-01-15T03:18:00.000Z" title="1/15/2022, 11:18:00 AM">2022-01-15</time>发表</span><span class="level-item"><a class="link-muted" href="/categories/Cryptography/">Cryptography</a></span><span class="level-item">9 分钟读完 (大约1387个字)</span><span class="level-item" id="busuanzi_container_page_pv"><span id="busuanzi_value_page_pv">0</span> 次访问</span></div></div><h1 class="title is-3 is-size-4-mobile">SPHINCS</h1><div class="content"><p>SPHINCS 于 2015 年由 <strong>Bernstein, Daniel J., Daira Hopwood, Andreas Hülsing</strong> 等人提出，具体的论文见 <a href="/2021/12/27/cryptography/signature/horst/sphincs.pdf" target="_blank">SPHINCS: practical stateless hash-based signatures</a>。</p>
+<p>SPHINCS 是一个无状态的签名系统。有状态指的是每次签名时需要记录系统的信息，比如是第几次签名，在验证的时候需要使用该参数，而无状态的签名系统则不需要保存这些信息。相对于有状态的签名系统，无状态的签名系统不需要记录签名的状态，符合标准的 API 且方便在不同主机上移植，无状态的签名系统是更好的选择。</p>
+<p>SPNHICS 基于多种签名算法，比如 <a href="/2021/12/28/cryptography/signature/wots-plus/" target="_blank">WOTS+</a>, <a href="/2021/12/27/cryptography/signature/horst/" target="_blank">HORST</a> 等，如果不了解相关内容，建议先参考之前的文章。</p>
+<span id="more"></span>
+
+<p>SPHINCS 的结构大致如下：</p>
+<img src="sphincs_structure.png" style="height: 400px; text-align: center">
+
+<p>每一个层的 Tree 都是一个 <strong>binary hash tree</strong>，叶子节点是 <strong>WOTS+</strong> 公钥通过 <strong>L-Tree</strong> 形成的根节点，这里的密钥对用来认证，最下面的 <strong>HORST</strong> 用来签名消息。</p>
+<p>SPHINCS 中使用 <strong>address scheme</strong> 来进行伪随机密钥的生成，一个地址(address) 由三个部分组成：</p>
+<img src="address.svg">
+
+
+<p>其中，Tree 部分的层数，从上到下，依次是 $d-1,d-2, \dotsm, 0$，HORST 属于 $d$ 层。</p>
+<p>下面通过 $(GEN, SIG, VER)$ 三部分进行讲解。</p>
+<h2 id="密钥生成-GEN"><a href="#密钥生成-GEN" class="headerlink" title="密钥生成 (GEN)"></a>密钥生成 (GEN)</h2><p>$$(SK, PK) \leftarrow GEN(1^k)$$</p>
+<p>首先，在 SPHINCS 中存在下面的几个参数:</p>
+<table>
+<thead>
+<tr>
+<th>paramter</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>$n$</td>
+<td>biglength of hashes in HORST and WOTS</td>
+</tr>
+<tr>
+<td>$m$</td>
+<td>bitlength of the message hash</td>
+</tr>
+<tr>
+<td>$h$</td>
+<td>height of the hyper-tree</td>
+</tr>
+<tr>
+<td>$d$</td>
+<td>layers of the hyper-tree</td>
+</tr>
+<tr>
+<td>$w$</td>
+<td>Winternitz parameter used for WOTS signatures</td>
+</tr>
+<tr>
+<td>$t$</td>
+<td>number of secret-key elements of HORST</td>
+</tr>
+<tr>
+<td>$k$</td>
+<td>number of revealed secret-key elements per HORST sig.</td>
+</tr>
+</tbody></table>
+<p>在 $SPHINCS-256$ 中，分别为</p>
+<p>$$n=256, m = 512, h=60,d=12,w=16,t=2^{16},k=32$$</p>
+<p>由 PRG 生成两个随机数作为私钥：</p>
+<p>$$(SK_1, SK_2) \in \{0, 1\} ^ n \times \{0,1\}^n$$</p>
+<p>$SK_1$ 用来生成密钥，$SK_2$ 在签名的时候用来生成不可预测的 $index$ 和随机化消息的哈希值。</p>
+<p>然后生成 $p$ 个随机数作为掩码</p>
+<p>$$Q = (Q_0, Q_1, \dotsm, Q_{p-1}) \leftarrow \{0, 1\} ^{p\times n}$$ </p>
+<p>且 $p$ 满足</p>
+<p>$$ p = \max\{2^w-1, 2(h+\lceil \log l \rceil), 2 \log t\}$$</p>
+<p>并且设</p>
+<p>$$\begin{aligned}<br>   Q_{WOTS+} &amp;= (Q_0, Q_1, \dotsm, Q_{2^w-2})<br>  \\<br>   Q_{HORST} &amp;= (Q_0, Q_1, \dotsm, Q_{2\log t-1})<br>  \\<br>   Q_{L-Tree} &amp;= (Q_0, Q_1, \dotsm, Q_{2\lceil \log l \rceil-1})<br>  \\<br>   Q_{Tree} &amp;= (Q_{2\lceil \log l \rceil},Q_{2\lceil \log l \rceil+1}, \dotsm, Q_{2(h+\lceil \log l \rceil)-1} )<br>\end{aligned} $$</p>
+<p>即 $Q_{WOTS+}$ 为 $Q$ 的前 $2^w-1$ 个， $Q_{HORST}$ 为 $Q$ 的前 $2 \log t$ 个，$Q_{L-Tree}$ 为前 $2\lceil \log l \rceil$ 个，$Q_{Tree}$ 为 $Q_{L-Tree}$ 随后的 $2h$ 个。</p>
+<p>最后，我们需要生成最上层的 Tree，也就是 layer d-1 的树。叶子节点为 WOTS+ 密钥对，通过上述的 <strong>address scheme</strong> 计算叶子节点的地址：</p>
+<p>$$A = (d-1||0||i),  i \in [0, 2^{h/d}-1]$$</p>
+<p>随后可以计算出对应的随机数种子：</p>
+<p>$$S_A \leftarrow \mathcal{F_a}(A, SK_1)$$</p>
+<p>此处，将 $\mathcal{F_a}$ 认为是一个哈希函数即可。</p>
+<p>然后我们就可以生成对应的公钥了</p>
+<p>$$pk_A \leftarrow WOTS.kg(S_A, Q_{WOTS+})$$</p>
+<p>生成的 $$pk_A$$ 由 $l$ 个 $blocks$ 构成，将其构造成一个 <strong>L-Tree</strong>，根节点就是在 Tree 上的叶子节点值。</p>
+<p>就这样，我们可以获取到 $Tree_0$ 的根节点值 $PK_1$。</p>
+<p>从而，SPHINCS 的公私钥为：</p>
+<p>$$<br>\begin{cases}<br>  SK = (SK_1, SK_2, Q)<br>  \\<br>  PK = (PK_1, Q)<br>\end{cases}<br>$$</p>
+<p>图示：</p>
+<img src="gen.svg">
+
+<h2 id="消息签名-SIG"><a href="#消息签名-SIG" class="headerlink" title="消息签名 (SIG)"></a>消息签名 (SIG)</h2><p>$$\Sigma \leftarrow sign(M,SK)$$</p>
+<p>对于输入的 $M\in \{0, 1\}^*, SK = (SK_1, SK_2,Q )$ ，首先计算消息的随机摘要，利用 $M,SK_2$ 生成一个随机数</p>
+<p>$$R = (R_1, R_2) \in \{0, 1\}^n \times \{0,1\}^n \leftarrow \mathcal{F}(M, SK_2)$$</p>
+<p>取 $R_1$ 计算消息的随机摘要：</p>
+<p>$$D \leftarrow \mathcal{H}(R_1, M)$$</p>
+<p>取 $R_2$ 的前 $h$ bits 选择 HORST 密钥对</p>
+<p>$$i \leftarrow C_{HOP}(R_2,h)$$</p>
+<p>因为树高 $h$，$h$ bits 包含 $2^h$ 个数，正是 HORST 的数量。</p>
+<p>已知 $i$ 之后，我们可以计算该 HORST 的地址</p>
+<p>$$A_{HORST} = (d || i(0, (d-1)h/d)||i((d-1)h/d,h/d))$$</p>
+<p>其中， $i(start, length)$ 表示从 $start$ 比特位开始，截取 $length$ 长度的比特值。</p>
+<p>同理，计算出对应的随机数种子：</p>
+<p>$$S_{HORST} \leftarrow \mathcal{F_a}(A_{HORST}, SK_1)$$</p>
+<p>根据随机数种子和掩码 $Q$，我们可以获取到：</p>
+<p>$$(\sigma_H, pk_H) \leftarrow HORST.sign(D, S_{A_{HORST}}, Q_{HORST})$$</p>
+<p>对于 layer $j, j \in [0, d)$，计算 WOTS+ 密钥对的地址：</p>
+<p>$$A_j = (j || i(0, (d-1-j)h/d) || i((d-1-j)h/d,h/d))$$</p>
+<p>计算出地址之后，求出对应的随机数种子</p>
+<p>$$S_{A_j} = \mathcal{F_a}(A_j, SK_1)$$</p>
+<p>然后计算签名：</p>
+<p>$$\sigma_{w,j} \leftarrow WOTS.sign(pk_{w,j-1}, S_{A_j}, Q_{WOTS+})$$</p>
+<p>$pk_{w,j-1}$ 就是 Tree 的根节点，这里取 $\sigma_{-1} = pk_H$，也就是 HORST 的根节点，同时，我们还需要求出 WOTS+ 密钥对的认证路径 $Auth_{A_{d-1}}$。</p>
+<p>最后得出，签名为：</p>
+<p>$$\Sigma = (i, R_1, \sigma_H, \sigma_{W, 0}, Auth_{A_0}, \dotsm, \sigma_{W,d-1}, Auth_{A_{d-1}})$$</p>
+<p>图示：</p>
+<img src="sign.svg">
+
+
+<h2 id="消息校验-VER"><a href="#消息校验-VER" class="headerlink" title="消息校验 (VER)"></a>消息校验 (VER)</h2><p>$$b\leftarrow VEF(M,\Sigma, PK)$$</p>
+<p>对于消息 $M\in \{0,1\}^*$ 计算出摘要 $D \leftarrow \mathcal{H}(R_1, M)$。</p>
+<p>然后首先校验 $\sigma_H$：</p>
+<p>$$pk_H \leftarrow HORST.verify(D, \sigma_H, Q_{HORST})$$</p>
+<p>如果校验没通过，返回失败，否则进行下一步。</p>
+<p>计算 WOTS+ 的公钥</p>
+<p>$$pk_{W,0} \leftarrow WOTS.verify(pk_H, \sigma_{w,0}, Q_{HORST})$$</p>
+<p>公钥共 $l\ blocks$，形成 L-Tree，计算出根节点，结合 $Auth_{A_0}$ 计算出 Tree 的根节点。</p>
+<p>对于 layer 1~d-1，也是类似的操作，最后得出最上面的那棵树的根节点 $ROOT_{d-1}$，如果 $PK_1 = ROOT_{d-1}$，那么返回 true，否则返回 false。</p>
+<p>图示：</p>
+<img src="verify.svg">
+
+</div><div><hr><p>生活杂笔，学习杂记，偶尔随便写写东西。 </p><div style="height:110px; background-size: contain;background-repeat: no-repeat; background-image: url('/images/account/logo.png')"></div></div><div class="article-licensing box"><div class="licensing-title"><p>SPHINCS</p><p><a href="https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/">https://junhaideng.github.io/2022/01/15/cryptography/signature/sphincs/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>Edgar</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2022-01-15</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2024-12-08</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/tags/cryptography/">cryptography</a><a class="link-muted mr-2" rel="tag" href="/tags/signature/">signature</a><a class="link-muted mr-2" rel="tag" href="/tags/hash-based/">hash-based</a><a class="link-muted mr-2" rel="tag" href="/tags/stateless/">stateless</a></div><!--!--></article></div><div class="card"><div class="card-content"><h3 class="menu-label has-text-centered">喜欢这篇文章？打赏一下作者吧</h3><div class="buttons is-centered"><a class="button donate" data-type="alipay"><span class="icon is-small"><i class="fab fa-alipay"></i></span><span>支付宝</span><span class="qrcode"><img src="/images/donates/alipay.jpg" alt="支付宝"></span></a><a class="button donate" data-type="wechat"><span class="icon is-small"><i class="fab fa-weixin"></i></span><span>微信</span><span class="qrcode"><img src="/images/donates/wechat.jpg" alt="微信"></span></a></div></div></div><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/2022/04/10/golang/fundamental/test/cover/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">Go 代码测试覆盖度</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/2022/01/04/rust/cargo/version/"><span class="level-item">cargo 中的语义版本控制系统</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><div class="card"><div class="card-content"><h3 class="title is-5">评论</h3><div id="comment-container"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1.7.2/dist/gitalk.css"><script src="https://cdn.jsdelivr.net/npm/gitalk@1.7.2/dist/gitalk.min.js"></script><script>var gitalk = new Gitalk({
+            id: "91f1ce82f3fe487d39b07e27e3f6e85b",
+            repo: "blog-comments",
+            owner: "junhaideng",
+            clientID: "a00c6e0fad199e0ed366",
+            clientSecret: "071d3ee812d1776361977a709da2a23d7ea2a016",
+            admin: ["junhaideng"],
+            createIssueManually: false,
+            distractionFreeMode: false,
+            perPage: 20,
+            pagerDirection: "last",
+            
+            
+            enableHotKey: true,
+            language: "zh-CN",
+        })
+        gitalk.render('comment-container')</script></div></div></div><div class="column column-left is-4-tablet is-4-desktop is-3-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="/images/avatar.png" alt="Edgar"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">Edgar</p><p class="is-size-6 is-block">生活杂笔，学习杂记</p><p class="is-size-6 is-flex justify-content-center"><i class="fas fa-map-marker-alt mr-1"></i><span>Shanghai, China</span></p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/archives"><p class="title">32</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/categories"><p class="title">12</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/tags"><p class="title">34</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="/about" target="_blank" rel="noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="noopener" title="Github" href="https://github.com/junhaideng"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="noopener" title="CSDN" href="https://blog.csdn.net/weixin_44676081">CSDN</a></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2023-09-02T23:27:00.000Z">2023-09-03</time></p><p class="title"><a href="/2023/09/03/tools/vim/">Vim 常见命令及其对应的含义</a></p><p class="categories"><a href="/categories/tool/">tool</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-11-16T15:14:32.000Z">2022-11-16</time></p><p class="title"><a href="/2022/11/16/golang/dlv/">使用 dlv 进行 debug</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-09-02T16:00:00.000Z">2022-09-03</time></p><p class="title"><a href="/2022/09/03/rust/macro/derive/">Rust 编写 derive 宏</a></p><p class="categories"><a href="/categories/Rust/">Rust</a> / <a href="/categories/Rust/Note/">Note</a> / <a href="/categories/Rust/Note/Macro/">Macro</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-07-26T16:00:00.000Z">2022-07-27</time></p><p class="title"><a href="/2022/07/27/rust/default/">Rust 参数设置默认值</a></p><p class="categories"><a href="/categories/Rust/">Rust</a> / <a href="/categories/Rust/Note/">Note</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-04-10T04:22:43.000Z">2022-04-10</time></p><p class="title"><a href="/2022/04/10/golang/fundamental/test/cover/">Go 代码测试覆盖度</a></p></div></article></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/tags/Cargo/"><span class="tag">Cargo</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/FTS/"><span class="tag">FTS</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Gin/"><span class="tag">Gin</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/GitHub/"><span class="tag">GitHub</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/GitHub-Actions/"><span class="tag">GitHub Actions</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Go/"><span class="tag">Go</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/tags/HTTP/"><span class="tag">HTTP</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Language/"><span class="tag">Language</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/OTS/"><span class="tag">OTS</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Rust/"><span class="tag">Rust</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Scheduler/"><span class="tag">Scheduler</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Vim/"><span class="tag">Vim</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/api/"><span class="tag">api</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/blog/"><span class="tag">blog</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/container/"><span class="tag">container</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/cryptography/"><span class="tag">cryptography</span><span class="tag">9</span></a></div><div class="control"><a class="tags has-addons" href="/tags/deploy/"><span class="tag">deploy</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/design/"><span class="tag">design</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/design-pattern/"><span class="tag">design pattern</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/distribution/"><span class="tag">distribution</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/tags/docker/"><span class="tag">docker</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/framework/"><span class="tag">framework</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/fundamental/"><span class="tag">fundamental</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/tags/git/"><span class="tag">git</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/hash/"><span class="tag">hash</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/hash-based/"><span class="tag">hash-based</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/tags/package/"><span class="tag">package</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/proxy/"><span class="tag">proxy</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/signature/"><span class="tag">signature</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/tags/sort/"><span class="tag">sort</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/source-code/"><span class="tag">source code</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/stateless/"><span class="tag">stateless</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/testing/"><span class="tag">testing</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/tools/"><span class="tag">tools</span><span class="tag">1</span></a></div></div></div></div></div><div class="column-right-shadow is-hidden-widescreen is-sticky"></div></div><div class="column column-right is-4-tablet is-4-desktop is-3-widescreen is-hidden-touch is-hidden-desktop-only order-3 is-sticky"><div class="card widget" id="toc" data-type="toc"><div class="card-content"><div class="menu"><h3 class="menu-label">目录</h3><ul class="menu-list"><li><a class="level is-mobile" href="#密钥生成-GEN"><span class="level-left"><span class="level-item">1</span><span class="level-item">密钥生成 (GEN)</span></span></a></li><li><a class="level is-mobile" href="#消息签名-SIG"><span class="level-left"><span class="level-item">2</span><span class="level-item">消息签名 (SIG)</span></span></a></li><li><a class="level is-mobile" href="#消息校验-VER"><span class="level-left"><span class="level-item">3</span><span class="level-item">消息校验 (VER)</span></span></a></li></ul></div></div><style>#toc .menu-list > li > a.is-active + .menu-list { display: block; }#toc .menu-list > li > a + .menu-list { display: none; }</style><script src="/js/toc.js" defer></script></div></div></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/">Edgar&#039;s Blog</a><p class="is-size-7"><span>&copy; 2024 Edgar</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a><br><span id="busuanzi_container_site_uv">共 <span id="busuanzi_value_site_uv">0</span> 个访客</span></p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Creative Commons" href="https://creativecommons.org/"><i class="fab fa-creative-commons"></i></a></p><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Attribution 4.0 International" href="https://creativecommons.org/licenses/by/4.0/"><i class="fab fa-creative-commons-by"></i></a></p><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="GitHub" href="https://github.com/junhaideng"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-CN");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script src="/js/column.js"></script><script src="/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script src="/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script type="text/x-mathjax-config">MathJax.Hub.Config({
+            'HTML-CSS': {
+                matchFontHeight: false
+            },
+            SVG: {
+                matchFontHeight: false
+            },
+            CommonHTML: {
+                matchFontHeight: false
+            },
+            tex2jax: {
+                inlineMath: [
+                    ['$','$'],
+                    ['\\(','\\)']
+                ]
+            }
+        });</script><script src="https://cdn.jsdelivr.net/npm/mathjax@2.7.9/unpacked/MathJax.js?config=TeX-MML-AM_CHTML" defer></script><!--!--><!--!--><!--!--><script src="/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script src="/js/insight.js" defer></script><script>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script></body></html>

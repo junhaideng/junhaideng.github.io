@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><meta><title>Docker 基本使用 - Edgar&#039;s Blog</title><link rel="manifest" href="/manifest.json"><meta name="application-name" content="Edgar&#039;s Blog"><meta name="msapplication-TileImage" content="/images/favicon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Edgar&#039;s Blog"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="description" content="Docker 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。 下面介绍一下基本使用： 从一个Hello world开始Docker 可以允许你在容器中运行应用程序，使用 docker run 可以在容器中运行一个应用程序。 1docker run ubuntu:18.04 &amp;#x2F;bin&amp;#x2F;echo &amp;quot;Hello world"><meta property="og:type" content="blog"><meta property="og:title" content="Docker 基本使用"><meta property="og:url" content="https://junhaideng.github.io/2021/07/10/docker/basic/"><meta property="og:site_name" content="Edgar&#039;s Blog"><meta property="og:description" content="Docker 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。 下面介绍一下基本使用： 从一个Hello world开始Docker 可以允许你在容器中运行应用程序，使用 docker run 可以在容器中运行一个应用程序。 1docker run ubuntu:18.04 &amp;#x2F;bin&amp;#x2F;echo &amp;quot;Hello world"><meta property="og:locale" content="zh_CN"><meta property="og:image" content="https://junhaideng.github.io/img/og_image.png"><meta property="article:published_time" content="2021-07-10T01:51:00.000Z"><meta property="article:modified_time" content="2024-12-08T15:52:33.802Z"><meta property="article:author" content="Edgar"><meta property="article:tag" content="docker"><meta property="article:tag" content="container"><meta property="twitter:card" content="summary"><meta property="twitter:image" content="/img/og_image.png"><script type="application/ld+json">{"@context":"https://schema.org","@type":"BlogPosting","mainEntityOfPage":{"@type":"WebPage","@id":"https://junhaideng.github.io/2021/07/10/docker/basic/"},"headline":"Docker 基本使用","image":["https://junhaideng.github.io/img/og_image.png"],"datePublished":"2021-07-10T01:51:00.000Z","dateModified":"2024-12-08T15:52:33.802Z","author":{"@type":"Person","name":"Edgar"},"publisher":{"@type":"Organization","name":"Edgar's Blog","logo":{"@type":"ImageObject","url":{"text":"Edgar's Blog"}}},"description":"Docker 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。 下面介绍一下基本使用： 从一个Hello world开始Docker 可以允许你在容器中运行应用程序，使用 docker run 可以在容器中运行一个应用程序。 1docker run ubuntu:18.04 &#x2F;bin&#x2F;echo &quot;Hello world"}</script><link rel="canonical" href="https://junhaideng.github.io/2021/07/10/docker/basic/"><link rel="icon" href="/images/favicon.png"><link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.2/css/all.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@9.12.0/styles/atom-one-light.css"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;600&amp;family=Source+Code+Pro"><link rel="stylesheet" href="/css/default.css"><style>body>.footer,body>.navbar,body>.section{opacity:0}</style><!--!--><script>var _hmt = _hmt || [];
+        (function() {
+            var hm = document.createElement("script");
+            hm.src = "//hm.baidu.com/hm.js?5f7f74178f594a205a613901bcef33d1";
+            var s = document.getElementsByTagName("script")[0];
+            s.parentNode.insertBefore(hm, s);
+        })();</script><!--!--><script src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js" defer></script><!--!--><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/css/lightgallery.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/css/justifiedGallery.min.css"><!--!--><!--!--><!--!--><style>.pace{-webkit-pointer-events:none;pointer-events:none;-webkit-user-select:none;-moz-user-select:none;user-select:none}.pace-inactive{display:none}.pace .pace-progress{background:#3273dc;position:fixed;z-index:2000;top:0;right:100%;width:100%;height:2px}</style><script src="https://cdn.jsdelivr.net/npm/pace-js@1.2.4/pace.min.js"></script><!--!--><!--!--><meta name="generator" content="Hexo 5.4.2"></head><body class="is-3-column"><nav class="navbar navbar-main"><div class="container"><script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5895878473779987" crossorigin="anonymous"></script><div class="navbar-brand justify-content-center"><a class="navbar-item navbar-logo" href="/">Edgar&#039;s Blog</a></div><div class="navbar-menu"><div class="navbar-start"><a class="navbar-item" href="/">首页</a><a class="navbar-item" href="/archives">归档</a><a class="navbar-item" href="/categories">分类</a><a class="navbar-item" href="/tags">标签</a><a class="navbar-item" href="/about">关于</a></div><div class="navbar-end"><a class="navbar-item is-hidden-tablet catalogue" title="目录" href="javascript:;"><i class="fas fa-list-ul"></i></a><a class="navbar-item search" title="搜索" href="javascript:;"><i class="fas fa-search"></i></a></div></div></div></nav><section class="section"><div class="container"><div class="columns"><div class="column order-2 column-main is-8-tablet is-8-desktop is-6-widescreen"><div class="card"><article class="card-content article" role="article"><div class="article-meta is-size-7 is-uppercase level is-mobile"><div class="level-left"><span class="level-item"><time dateTime="2021-07-10T01:51:00.000Z" title="7/10/2021, 9:51:00 AM">2021-07-10</time>发表</span><span class="level-item"><a class="link-muted" href="/categories/docker/">docker</a></span><span class="level-item">16 分钟读完 (大约2456个字)</span><span class="level-item" id="busuanzi_container_page_pv"><span id="busuanzi_value_page_pv">0</span> 次访问</span></div></div><h1 class="title is-3 is-size-4-mobile">Docker 基本使用</h1><div class="content"><p><code>Docker</code> 是一个现代化的容器技术，使用它我们可以轻松的将应用进行打包，然后移植到其他系统，不必要在不同设备上反复配置对应的环境。</p>
+<p>下面介绍一下基本使用：</p>
+<h2 id="从一个Hello-world开始"><a href="#从一个Hello-world开始" class="headerlink" title="从一个Hello world开始"></a>从一个Hello world开始</h2><p>Docker 可以允许你在容器中运行应用程序，使用 <code>docker run</code> 可以在容器中运行一个应用程序。</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker run ubuntu:18.04 /bin/echo <span class="string">&quot;Hello world&quot;</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>run</code>: 表示运行一个容器</li>
+<li><code>ubuntu:18.04</code>: 指定要运行的镜像，Docker 首先在本地主机上查找对应的镜像是否存在，如果不存在的话，那么会从远程镜像仓库 <code>Docker Hub</code> 中下载公共镜像，如果没有指定后面的 TAG，那么默认情况下使用的是 latest</li>
+<li><code>/bin/echo &quot;Hello world&quot;</code>: 在启动的容器中执行的命令</li>
+</ul>
+<span id="more"></span>
+
+<p>运行完上面的命令之后，我们会下载一个 <code>ubuntu</code> 镜像，并且创建一个容器，使用下面的命令可以查看所有的镜像文件</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
+
+<p>如果我们不需要这些容器了，我们可以使用下面命令进行删除</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># container 指的是容器的ID或者NAME，可以一次性删除多个</span></span><br><span class="line">docker <span class="built_in">rm</span> container [container...]</span><br></pre></td></tr></table></figure>
+
+<h3 id="运行交互式容器"><a href="#运行交互式容器" class="headerlink" title="运行交互式容器"></a>运行交互式容器</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">docker run -i -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># -i -t 可以合并为-it</span></span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-t</code>: 在新容器中指令一个伪终端或终端</li>
+<li><code>-i:</code> 允许对容器中的标准输入(stdin)进行交互</li>
+</ul>
+<p>输入<code>exit</code>可以退出当前容器</p>
+<h3 id="运行后台模式容器"><a href="#运行后台模式容器" class="headerlink" title="运行后台模式容器"></a>运行后台模式容器</h3><p>使用下面的命令可以创建一个以进程方式运行的容器</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker run -d ubuntu:18.04 /bin/sh -c <span class="string">&quot;while true; do echo hello world; sleep 1; done&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>运行完上面的命令之后会输出一串字符串，表示的是这个 <code>容器ID</code></p>
+<h2 id="容器使用"><a href="#容器使用" class="headerlink" title="容器使用"></a>容器使用</h2><h4 id="获取镜像"><a href="#获取镜像" class="headerlink" title="获取镜像"></a>获取镜像</h4><p>如果本地没有镜像，那么可以使用下面的命令获取 <code>ubuntu</code> 镜像</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker pull ubuntu</span><br></pre></td></tr></table></figure>
+
+<h4 id="启动容器"><a href="#启动容器" class="headerlink" title="启动容器"></a>启动容器</h4><p>使用下面命令启动一个容器，并且以命令行模式进入该容器</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">docker run -it ubuntu /bin/bash</span><br><span class="line"><span class="comment"># 默认使用的就是 /bin/bash</span></span><br></pre></td></tr></table></figure>
+
+<p>使用 <code>exit</code> 可退出终端</p>
+<h4 id="后台运行"><a href="#后台运行" class="headerlink" title="后台运行"></a>后台运行</h4><p>在大部分的场景下，我们希望 <code>docker</code> 的服务是在后台运行的，使用 <code>-d</code> 参数指定容器以 <code>守护进程</code> 的形式运行</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker run -itd --name ubuntu-test ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<h4 id="启动、停止容器"><a href="#启动、停止容器" class="headerlink" title="启动、停止容器"></a>启动、停止容器</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">docker stop container</span><br><span class="line"><span class="comment"># 启动一个已经停止的容器</span></span><br><span class="line">docker start container</span><br><span class="line"><span class="comment"># 重启一个容器</span></span><br><span class="line">docker restart container</span><br></pre></td></tr></table></figure>
+
+<h4 id="进入容器"><a href="#进入容器" class="headerlink" title="进入容器"></a>进入容器</h4><p>在使用 <code>-d</code> 参数时，容器启动会进入后台，此时如果想要进入容器，可以使用下面的指令进入</p>
+<ul>
+<li><code>docker attach container</code></li>
+<li><code>docker exec container</code><blockquote>
+<p>推荐使用 docker exec，因为使用这个方式退出终端之后不会导致容器的停止</p>
+</blockquote>
+</li>
+</ul>
+<p>使用 <code>docker exec</code> 的时候需要指定运行的命令，比如</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker <span class="built_in">exec</span> -it 243c32535da7 /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>而使用 <code>docker attach</code> 的时候会直接进行上一次的命令</p>
+<h4 id="删除容器"><a href="#删除容器" class="headerlink" title="删除容器"></a>删除容器</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker <span class="built_in">rm</span> container</span><br></pre></td></tr></table></figure>
+
+<p>删除容器的时候必须是停止状态</p>
+<h4 id="查看网络端口映射"><a href="#查看网络端口映射" class="headerlink" title="查看网络端口映射"></a>查看网络端口映射</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># PORTS信息中有</span></span><br><span class="line">docker ps</span><br><span class="line"></span><br><span class="line"><span class="comment"># 查看指定容器的端口映射</span></span><br><span class="line">docker port container</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看容器日志"><a href="#查看容器日志" class="headerlink" title="查看容器日志"></a>查看容器日志</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker logs container</span><br></pre></td></tr></table></figure>
+
+<h4 id="查看容器的进程"><a href="#查看容器的进程" class="headerlink" title="查看容器的进程"></a>查看容器的进程</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker top container</span><br></pre></td></tr></table></figure>
+
+<h4 id="检查容器"><a href="#检查容器" class="headerlink" title="检查容器"></a>检查容器</h4><p>输出容器的一系列信息</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker inspect container</span><br></pre></td></tr></table></figure>
+
+<h3 id="Docker-镜像使用"><a href="#Docker-镜像使用" class="headerlink" title="Docker 镜像使用"></a>Docker 镜像使用</h3><p>当运行容器的时候，如果使用的容器本地不存在，那么 <code>docker</code> 会自动从镜像仓库中下载，默认是 <code>Docker Hub</code> 公共镜像源</p>
+<h4 id="列出所有镜像列表"><a href="#列出所有镜像列表" class="headerlink" title="列出所有镜像列表"></a>列出所有镜像列表</h4><figure class="highlight go"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker images</span><br></pre></td></tr></table></figure>
+
+<h4 id="获取一个新的镜像"><a href="#获取一个新的镜像" class="headerlink" title="获取一个新的镜像"></a>获取一个新的镜像</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker pull ubuntu:18.04</span><br></pre></td></tr></table></figure>
+
+<h4 id="查找镜像"><a href="#查找镜像" class="headerlink" title="查找镜像"></a>查找镜像</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker search xxx</span><br></pre></td></tr></table></figure>
+
+<h4 id="删除镜像"><a href="#删除镜像" class="headerlink" title="删除镜像"></a>删除镜像</h4><p>镜像的删除使用 docker rmi 命令</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker rmi imageName</span><br></pre></td></tr></table></figure>
+
+<h4 id="设置镜像标签"><a href="#设置镜像标签" class="headerlink" title="设置镜像标签"></a>设置镜像标签</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker tag container xxx:xxx</span><br></pre></td></tr></table></figure>
+
+<h3 id="Docker-容器网络连接"><a href="#Docker-容器网络连接" class="headerlink" title="Docker 容器网络连接"></a>Docker 容器网络连接</h3><p>容器中可以运行一些网络应用，要想让外部也可以访问里面的这些应用，那么可以通过 <code>-P</code> 或者 <code>-p</code> 参数来指定端口映射</p>
+<h4 id="网络端口映射"><a href="#网络端口映射" class="headerlink" title="网络端口映射"></a>网络端口映射</h4><p>比如说运行一个 python 应用</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">docker run -d -P webapp python app.py</span><br><span class="line"><span class="comment"># 将容器内容的5000(2)端口映射到宿主机的5000(1)端口</span></span><br><span class="line">docker run -d -p 5000:5000 webapp python app.py</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-P</code>: 容器里面的端口随机映射到主机端口</li>
+<li><code>-p</code>: 容器内部端口绑定到指定的主机端口</li>
+<li>端口进行映射之后，我们可以使用 <code>docker ps</code> 或者 <code>docker port container</code> 进行查看对应的端口映射关系</li>
+</ul>
+<p>默认情况下绑定的都是 <code>tcp</code> 端口，如果要绑定 <code>udp</code> 端口，可以再端口后面加 <code>/udp</code></p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker run -d -p 127.0.0.1:5000:5000/udp webapp python app.py</span><br></pre></td></tr></table></figure>
+
+<h4 id="Docker-容器互联"><a href="#Docker-容器互联" class="headerlink" title="Docker 容器互联"></a>Docker 容器互联</h4><p>端口映射不是唯一的将 <code>docker</code> 连接到另一个容器的方法<br><code>docker</code> 有一个连接系统允许将多个容器连接在一起，共享连接信息<br><code>docker</code> 连接会创建一个父子关系，其中父容器可以看到子容器的信息</p>
+<h5 id="端口命名"><a href="#端口命名" class="headerlink" title="端口命名"></a>端口命名</h5><p>当我们创建一个容器的时候，docker 会自动对它进行命名，我们可以使用 <code>--name</code> 参数来自定义命名</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">docker run -d --name ubuntu -t ubuntu:18.04 /bin/bash</span><br><span class="line"><span class="comment"># 下面方法可以修改一个container的name</span></span><br><span class="line">docker rename container NEW_NAME</span><br></pre></td></tr></table></figure>
+
+<h4 id="新建网络"><a href="#新建网络" class="headerlink" title="新建网络"></a>新建网络</h4><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker network</span><br></pre></td></tr></table></figure>
+
+<p>eg:</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">docker network create -d bridge test-net</span><br><span class="line"><span class="comment"># -d 表示新建网络内省，有bridge, overlay</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="连接容器"><a href="#连接容器" class="headerlink" title="连接容器"></a>连接容器</h4><p>运行一个容器并连接到新建的网络中</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker run -itd --name test1 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>然后在打开一个新的终端运行一个容器并加入到 test-net 网络中</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker run -itd --name test2 --network test-net ubuntu /bin/bash</span><br></pre></td></tr></table></figure>
+
+<p>然后可以在容器之间进行 ping</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">ping test1  <span class="comment"># test2内</span></span><br><span class="line">ping test2  <span class="comment"># test1内</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="Dockerfile"><a href="#Dockerfile" class="headerlink" title="Dockerfile"></a>Dockerfile</h2><p>Dockerfile 可以用来构建一个镜像，文本内容包含了一条条构建镜像所需要的指令和说明</p>
+<h3 id="使用-Dockerfile-定制镜像"><a href="#使用-Dockerfile-定制镜像" class="headerlink" title="使用 Dockerfile 定制镜像"></a>使用 Dockerfile 定制镜像</h3><figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">FROM</span> node</span><br><span class="line"><span class="keyword">COPY</span><span class="language-bash"> . /server</span></span><br><span class="line"><span class="keyword">WORKDIR</span><span class="language-bash"> /server</span></span><br><span class="line"><span class="keyword">RUN</span><span class="language-bash"> npm install --production</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">EXPOSE</span> <span class="number">3001</span></span><br><span class="line"><span class="keyword">ENTRYPOINT</span><span class="language-bash"> [ <span class="string">&quot;npm&quot;</span>, <span class="string">&quot;run&quot;</span>, <span class="string">&quot;start&quot;</span>]</span></span><br></pre></td></tr></table></figure>
+
+<p><code>FROM</code> 指定使用哪一个镜像源<br><code>RUN</code> 指定要执行的命令<br><code>COPY</code> 执行相应的复制操作</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker build -t centos:6.7 DockerfilePath</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>-t</code>: 指定创建的目标镜像名</li>
+<li><code>DockerfilePath</code>: 指定需要使用的 <code>Dockerfile</code> 文件，也可以指定所在目录，但是这样目录中的构建文件名必须是 <code>Dockerfile</code></li>
+</ul>
+<h3 id="构建镜像"><a href="#构建镜像" class="headerlink" title="构建镜像"></a>构建镜像</h3><p>在 Dockerfile 文件的存放目录下，执行构建动作</p>
+<figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">docker build -t nginx:v3 .</span><br></pre></td></tr></table></figure>
+
+<p><code>.</code>, 上下文路径， 可以用 Dockerfile 的路径来代替，也可以使用目录，只不过构建文件名必须为 Dockerfile</p>
+<h3 id="指令详解"><a href="#指令详解" class="headerlink" title="指令详解"></a>指令详解</h3><h4 id="COPY"><a href="#COPY" class="headerlink" title="COPY"></a>COPY</h4><p>复制指令，从上下文目录中复制文件或者目录到容器里指定路径。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="language-bash"> [--<span class="built_in">chown</span>=&lt;user&gt;:&lt;group&gt;] &lt;源路径1&gt;...  &lt;目标路径&gt;</span></span><br><span class="line"><span class="keyword">COPY</span><span class="language-bash"> [--<span class="built_in">chown</span>=&lt;user&gt;:&lt;group&gt;] [<span class="string">&quot;&lt;源路径1&gt;&quot;</span>,...  <span class="string">&quot;&lt;目标路径&gt;&quot;</span>]</span></span><br></pre></td></tr></table></figure>
+
+<p><code>--chown=</code>：可选参数，用户改变复制到容器内文件的拥有者和属组。</p>
+<p><code>源路径</code>：源文件或者源目录，这里可以是通配符表达式，其通配符规则要满足 Go 的 filepath.Match 规则。例如：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">COPY</span><span class="language-bash"> hom* /mydir/</span></span><br><span class="line"><span class="keyword">COPY</span><span class="language-bash"> hom?.txt /mydir/</span></span><br></pre></td></tr></table></figure>
+
+<p><code>&lt;目标路径&gt;</code>：容器内的指定路径，该路径不用事先建好，路径不存在的话，会自动创建。</p>
+<h4 id="ADD"><a href="#ADD" class="headerlink" title="ADD"></a>ADD</h4><p>ADD 指令和 COPY 的使用格式一致（同样需求下，官方推荐使用 COPY）。功能也类似，不同之处如下：</p>
+<ul>
+<li>ADD 的优点：在执行 &lt;源文件&gt; 为 tar 压缩文件的话，压缩格式为 gzip, bzip2 以及 xz 的情况下，会自动复制并解压到 &lt;目标路径&gt;。</li>
+<li>ADD 的缺点：在不解压的前提下，无法复制 tar 压缩文件。会令镜像构建缓存失效，从而可能会令镜像构建变得比较缓慢。具体是否使用，可以根据是否需要自动解压来决定。</li>
+</ul>
+<h4 id="CMD"><a href="#CMD" class="headerlink" title="CMD"></a>CMD</h4><p>类似于 RUN 指令，用于运行程序，但二者运行的时间点不同:</p>
+<ul>
+<li>CMD 在 <code>docker run</code> 时运行。</li>
+<li>RUN 是在<code>docker build</code>。</li>
+</ul>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">CMD</span><span class="language-bash"> &lt;shell 命令&gt;</span></span><br><span class="line"><span class="keyword">CMD</span><span class="language-bash"> [<span class="string">&quot;&lt;可执行文件或命令&gt;&quot;</span>,<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]</span></span><br><span class="line"><span class="keyword">CMD</span><span class="language-bash"> [<span class="string">&quot;&lt;param1&gt;&quot;</span>,<span class="string">&quot;&lt;param2&gt;&quot;</span>,...]  <span class="comment"># 该写法是为 ENTRYPOINT 指令指定的程序提供默认参数</span></span></span><br></pre></td></tr></table></figure>
+
+<p>推荐使用第二种格式，执行过程比较明确。第一种格式实际上在运行的过程中也会自动转换成第二种格式运行，并且默认可执行文件是 sh。</p>
+<h4 id="ENV"><a href="#ENV" class="headerlink" title="ENV"></a>ENV</h4><p>设置环境变量，定义了环境变量，那么在后续的指令中，就可以使用这个环境变量。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">ENV</span> &lt;key&gt; &lt;value&gt;</span><br><span class="line"><span class="keyword">ENV</span> &lt;key1&gt;=&lt;value1&gt; &lt;key2&gt;=&lt;value2&gt;...</span><br></pre></td></tr></table></figure>
+
+<h4 id="EXPOSE"><a href="#EXPOSE" class="headerlink" title="EXPOSE"></a>EXPOSE</h4><p>声明端口</p>
+<p>作用：</p>
+<ul>
+<li>帮助镜像使用者理解这个镜像服务的守护端口，以方便配置映射。</li>
+<li>在运行时使用随机端口映射时，也就是 docker run -P 时，会自动随机映射 EXPOSE 的端口。</li>
+</ul>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">EXPOSE</span> &lt;端口<span class="number">1</span>&gt; [&lt;端口<span class="number">2</span>&gt;...]</span><br></pre></td></tr></table></figure>
+
+<h4 id="WORKDIR"><a href="#WORKDIR" class="headerlink" title="WORKDIR"></a>WORKDIR</h4><p>指定工作目录。用 <code>WORKDIR</code> 指定的工作目录，会在构建镜像的每一层中都存在。（<code>WORKDIR</code> 指定的工作目录，必须是提前创建好的）。</p>
+<p><code>docker build</code> 构建镜像过程中的，每一个 <code>RUN</code> 命令都是新建的一层。只有通过 <code>WORKDIR</code> 创建的目录才会一直存在。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">WORKDIR</span><span class="language-bash"> &lt;工作目录路径&gt;</span></span><br></pre></td></tr></table></figure>
+
+<h4 id="USER"><a href="#USER" class="headerlink" title="USER"></a>USER</h4><p>用于指定执行后续命令的用户和用户组，这边只是切换后续命令执行的用户（用户和用户组必须提前已经存在）。</p>
+<p>格式：</p>
+<figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">USER</span> &lt;用户名&gt;[:&lt;用户组&gt;]</span><br></pre></td></tr></table></figure>
+
+
+</div><div><hr><p>生活杂笔，学习杂记，偶尔随便写写东西。 </p><div style="height:110px; background-size: contain;background-repeat: no-repeat; background-image: url('/images/account/logo.png')"></div></div><div class="article-licensing box"><div class="licensing-title"><p>Docker 基本使用</p><p><a href="https://junhaideng.github.io/2021/07/10/docker/basic/">https://junhaideng.github.io/2021/07/10/docker/basic/</a></p></div><div class="licensing-meta level is-mobile"><div class="level-left"><div class="level-item is-narrow"><div><h6>作者</h6><p>Edgar</p></div></div><div class="level-item is-narrow"><div><h6>发布于</h6><p>2021-07-10</p></div></div><div class="level-item is-narrow"><div><h6>更新于</h6><p>2024-12-08</p></div></div><div class="level-item is-narrow"><div><h6>许可协议</h6><p><a class="icons" rel="noopener" target="_blank" title="Creative Commons" href="https://creativecommons.org/"><i class="icon fab fa-creative-commons"></i></a><a class="icons" rel="noopener" target="_blank" title="Attribution" href="https://creativecommons.org/licenses/by/4.0/"><i class="icon fab fa-creative-commons-by"></i></a><a class="icons" rel="noopener" target="_blank" title="Noncommercial" href="https://creativecommons.org/licenses/by-nc/4.0/"><i class="icon fab fa-creative-commons-nc"></i></a></p></div></div></div></div></div><div class="article-tags is-size-7 mb-4"><span class="mr-2">#</span><a class="link-muted mr-2" rel="tag" href="/tags/docker/">docker</a><a class="link-muted mr-2" rel="tag" href="/tags/container/">container</a></div><!--!--></article></div><div class="card"><div class="card-content"><h3 class="menu-label has-text-centered">喜欢这篇文章？打赏一下作者吧</h3><div class="buttons is-centered"><a class="button donate" data-type="alipay"><span class="icon is-small"><i class="fab fa-alipay"></i></span><span>支付宝</span><span class="qrcode"><img src="/images/donates/alipay.jpg" alt="支付宝"></span></a><a class="button donate" data-type="wechat"><span class="icon is-small"><i class="fab fa-weixin"></i></span><span>微信</span><span class="qrcode"><img src="/images/donates/wechat.jpg" alt="微信"></span></a></div></div></div><nav class="post-navigation mt-4 level is-mobile"><div class="level-start"><a class="article-nav-prev level level-item link-muted" href="/2021/07/13/golang/options/"><i class="level-item fas fa-chevron-left"></i><span class="level-item">Golang 选项模式</span></a></div><div class="level-end"><a class="article-nav-next level level-item link-muted" href="/2021/07/03/network/http/"><span class="level-item">HTTP 协议简介</span><i class="level-item fas fa-chevron-right"></i></a></div></nav><div class="card"><div class="card-content"><h3 class="title is-5">评论</h3><div id="comment-container"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gitalk@1.7.2/dist/gitalk.css"><script src="https://cdn.jsdelivr.net/npm/gitalk@1.7.2/dist/gitalk.min.js"></script><script>var gitalk = new Gitalk({
+            id: "eaa028d684a0eb25bb1d515cebe66f77",
+            repo: "blog-comments",
+            owner: "junhaideng",
+            clientID: "a00c6e0fad199e0ed366",
+            clientSecret: "071d3ee812d1776361977a709da2a23d7ea2a016",
+            admin: ["junhaideng"],
+            createIssueManually: false,
+            distractionFreeMode: false,
+            perPage: 20,
+            pagerDirection: "last",
+            
+            
+            enableHotKey: true,
+            language: "zh-CN",
+        })
+        gitalk.render('comment-container')</script></div></div></div><div class="column column-left is-4-tablet is-4-desktop is-3-widescreen  order-1"><div class="card widget" data-type="profile"><div class="card-content"><nav class="level"><div class="level-item has-text-centered flex-shrink-1"><div><figure class="image is-128x128 mx-auto mb-2"><img class="avatar is-rounded" src="/images/avatar.png" alt="Edgar"></figure><p class="title is-size-4 is-block" style="line-height:inherit;">Edgar</p><p class="is-size-6 is-block">生活杂笔，学习杂记</p><p class="is-size-6 is-flex justify-content-center"><i class="fas fa-map-marker-alt mr-1"></i><span>Shanghai, China</span></p></div></div></nav><nav class="level is-mobile"><div class="level-item has-text-centered is-marginless"><div><p class="heading">文章</p><a href="/archives"><p class="title">32</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">分类</p><a href="/categories"><p class="title">12</p></a></div></div><div class="level-item has-text-centered is-marginless"><div><p class="heading">标签</p><a href="/tags"><p class="title">34</p></a></div></div></nav><div class="level"><a class="level-item button is-primary is-rounded" href="/about" target="_blank" rel="noopener">关注我</a></div><div class="level is-mobile is-multiline"><a class="level-item button is-transparent is-marginless" target="_blank" rel="noopener" title="Github" href="https://github.com/junhaideng"><i class="fab fa-github"></i></a><a class="level-item button is-transparent is-marginless" target="_blank" rel="noopener" title="CSDN" href="https://blog.csdn.net/weixin_44676081">CSDN</a></div></div></div><div class="card widget" data-type="recent-posts"><div class="card-content"><h3 class="menu-label">最新文章</h3><article class="media"><div class="media-content"><p class="date"><time dateTime="2023-09-02T23:27:00.000Z">2023-09-03</time></p><p class="title"><a href="/2023/09/03/tools/vim/">Vim 常见命令及其对应的含义</a></p><p class="categories"><a href="/categories/tool/">tool</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-11-16T15:14:32.000Z">2022-11-16</time></p><p class="title"><a href="/2022/11/16/golang/dlv/">使用 dlv 进行 debug</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-09-02T16:00:00.000Z">2022-09-03</time></p><p class="title"><a href="/2022/09/03/rust/macro/derive/">Rust 编写 derive 宏</a></p><p class="categories"><a href="/categories/Rust/">Rust</a> / <a href="/categories/Rust/Note/">Note</a> / <a href="/categories/Rust/Note/Macro/">Macro</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-07-26T16:00:00.000Z">2022-07-27</time></p><p class="title"><a href="/2022/07/27/rust/default/">Rust 参数设置默认值</a></p><p class="categories"><a href="/categories/Rust/">Rust</a> / <a href="/categories/Rust/Note/">Note</a></p></div></article><article class="media"><div class="media-content"><p class="date"><time dateTime="2022-04-10T04:22:43.000Z">2022-04-10</time></p><p class="title"><a href="/2022/04/10/golang/fundamental/test/cover/">Go 代码测试覆盖度</a></p></div></article></div></div><div class="card widget" data-type="tags"><div class="card-content"><div class="menu"><h3 class="menu-label">标签</h3><div class="field is-grouped is-grouped-multiline"><div class="control"><a class="tags has-addons" href="/tags/Cargo/"><span class="tag">Cargo</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/FTS/"><span class="tag">FTS</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Gin/"><span class="tag">Gin</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/GitHub/"><span class="tag">GitHub</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/GitHub-Actions/"><span class="tag">GitHub Actions</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Go/"><span class="tag">Go</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/tags/HTTP/"><span class="tag">HTTP</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Language/"><span class="tag">Language</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/OTS/"><span class="tag">OTS</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Rust/"><span class="tag">Rust</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Scheduler/"><span class="tag">Scheduler</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/Vim/"><span class="tag">Vim</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/api/"><span class="tag">api</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/blog/"><span class="tag">blog</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/container/"><span class="tag">container</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/cryptography/"><span class="tag">cryptography</span><span class="tag">9</span></a></div><div class="control"><a class="tags has-addons" href="/tags/deploy/"><span class="tag">deploy</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/design/"><span class="tag">design</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/design-pattern/"><span class="tag">design pattern</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/distribution/"><span class="tag">distribution</span><span class="tag">4</span></a></div><div class="control"><a class="tags has-addons" href="/tags/docker/"><span class="tag">docker</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/framework/"><span class="tag">framework</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/fundamental/"><span class="tag">fundamental</span><span class="tag">2</span></a></div><div class="control"><a class="tags has-addons" href="/tags/git/"><span class="tag">git</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/hash/"><span class="tag">hash</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/hash-based/"><span class="tag">hash-based</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/tags/package/"><span class="tag">package</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/proxy/"><span class="tag">proxy</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/signature/"><span class="tag">signature</span><span class="tag">8</span></a></div><div class="control"><a class="tags has-addons" href="/tags/sort/"><span class="tag">sort</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/source-code/"><span class="tag">source code</span><span class="tag">3</span></a></div><div class="control"><a class="tags has-addons" href="/tags/stateless/"><span class="tag">stateless</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/testing/"><span class="tag">testing</span><span class="tag">1</span></a></div><div class="control"><a class="tags has-addons" href="/tags/tools/"><span class="tag">tools</span><span class="tag">1</span></a></div></div></div></div></div><div class="column-right-shadow is-hidden-widescreen is-sticky"></div></div><div class="column column-right is-4-tablet is-4-desktop is-3-widescreen is-hidden-touch is-hidden-desktop-only order-3 is-sticky"><div class="card widget" id="toc" data-type="toc"><div class="card-content"><div class="menu"><h3 class="menu-label">目录</h3><ul class="menu-list"><li><a class="level is-mobile" href="#从一个Hello-world开始"><span class="level-left"><span class="level-item">1</span><span class="level-item">从一个Hello world开始</span></span></a><ul class="menu-list"><li><a class="level is-mobile" href="#运行交互式容器"><span class="level-left"><span class="level-item">1.1</span><span class="level-item">运行交互式容器</span></span></a></li><li><a class="level is-mobile" href="#运行后台模式容器"><span class="level-left"><span class="level-item">1.2</span><span class="level-item">运行后台模式容器</span></span></a></li></ul></li><li><a class="level is-mobile" href="#容器使用"><span class="level-left"><span class="level-item">2</span><span class="level-item">容器使用</span></span></a><ul class="menu-list"><ul class="menu-list"><li><a class="level is-mobile" href="#获取镜像"><span class="level-left"><span class="level-item">2.1.1</span><span class="level-item">获取镜像</span></span></a></li><li><a class="level is-mobile" href="#启动容器"><span class="level-left"><span class="level-item">2.1.2</span><span class="level-item">启动容器</span></span></a></li><li><a class="level is-mobile" href="#后台运行"><span class="level-left"><span class="level-item">2.1.3</span><span class="level-item">后台运行</span></span></a></li><li><a class="level is-mobile" href="#启动、停止容器"><span class="level-left"><span class="level-item">2.1.4</span><span class="level-item">启动、停止容器</span></span></a></li><li><a class="level is-mobile" href="#进入容器"><span class="level-left"><span class="level-item">2.1.5</span><span class="level-item">进入容器</span></span></a></li><li><a class="level is-mobile" href="#删除容器"><span class="level-left"><span class="level-item">2.1.6</span><span class="level-item">删除容器</span></span></a></li><li><a class="level is-mobile" href="#查看网络端口映射"><span class="level-left"><span class="level-item">2.1.7</span><span class="level-item">查看网络端口映射</span></span></a></li><li><a class="level is-mobile" href="#查看容器日志"><span class="level-left"><span class="level-item">2.1.8</span><span class="level-item">查看容器日志</span></span></a></li><li><a class="level is-mobile" href="#查看容器的进程"><span class="level-left"><span class="level-item">2.1.9</span><span class="level-item">查看容器的进程</span></span></a></li><li><a class="level is-mobile" href="#检查容器"><span class="level-left"><span class="level-item">2.1.10</span><span class="level-item">检查容器</span></span></a></li></ul><li><a class="level is-mobile" href="#Docker-镜像使用"><span class="level-left"><span class="level-item">2.2</span><span class="level-item">Docker 镜像使用</span></span></a><ul class="menu-list"><li><a class="level is-mobile" href="#列出所有镜像列表"><span class="level-left"><span class="level-item">2.2.1</span><span class="level-item">列出所有镜像列表</span></span></a></li><li><a class="level is-mobile" href="#获取一个新的镜像"><span class="level-left"><span class="level-item">2.2.2</span><span class="level-item">获取一个新的镜像</span></span></a></li><li><a class="level is-mobile" href="#查找镜像"><span class="level-left"><span class="level-item">2.2.3</span><span class="level-item">查找镜像</span></span></a></li><li><a class="level is-mobile" href="#删除镜像"><span class="level-left"><span class="level-item">2.2.4</span><span class="level-item">删除镜像</span></span></a></li><li><a class="level is-mobile" href="#设置镜像标签"><span class="level-left"><span class="level-item">2.2.5</span><span class="level-item">设置镜像标签</span></span></a></li></ul></li><li><a class="level is-mobile" href="#Docker-容器网络连接"><span class="level-left"><span class="level-item">2.3</span><span class="level-item">Docker 容器网络连接</span></span></a><ul class="menu-list"><li><a class="level is-mobile" href="#网络端口映射"><span class="level-left"><span class="level-item">2.3.1</span><span class="level-item">网络端口映射</span></span></a></li><li><a class="level is-mobile" href="#Docker-容器互联"><span class="level-left"><span class="level-item">2.3.2</span><span class="level-item">Docker 容器互联</span></span></a></li><li><a class="level is-mobile" href="#新建网络"><span class="level-left"><span class="level-item">2.3.3</span><span class="level-item">新建网络</span></span></a></li><li><a class="level is-mobile" href="#连接容器"><span class="level-left"><span class="level-item">2.3.4</span><span class="level-item">连接容器</span></span></a></li></ul></li></ul></li><li><a class="level is-mobile" href="#Dockerfile"><span class="level-left"><span class="level-item">3</span><span class="level-item">Dockerfile</span></span></a><ul class="menu-list"><li><a class="level is-mobile" href="#使用-Dockerfile-定制镜像"><span class="level-left"><span class="level-item">3.1</span><span class="level-item">使用 Dockerfile 定制镜像</span></span></a></li><li><a class="level is-mobile" href="#构建镜像"><span class="level-left"><span class="level-item">3.2</span><span class="level-item">构建镜像</span></span></a></li><li><a class="level is-mobile" href="#指令详解"><span class="level-left"><span class="level-item">3.3</span><span class="level-item">指令详解</span></span></a><ul class="menu-list"><li><a class="level is-mobile" href="#COPY"><span class="level-left"><span class="level-item">3.3.1</span><span class="level-item">COPY</span></span></a></li><li><a class="level is-mobile" href="#ADD"><span class="level-left"><span class="level-item">3.3.2</span><span class="level-item">ADD</span></span></a></li><li><a class="level is-mobile" href="#CMD"><span class="level-left"><span class="level-item">3.3.3</span><span class="level-item">CMD</span></span></a></li><li><a class="level is-mobile" href="#ENV"><span class="level-left"><span class="level-item">3.3.4</span><span class="level-item">ENV</span></span></a></li><li><a class="level is-mobile" href="#EXPOSE"><span class="level-left"><span class="level-item">3.3.5</span><span class="level-item">EXPOSE</span></span></a></li><li><a class="level is-mobile" href="#WORKDIR"><span class="level-left"><span class="level-item">3.3.6</span><span class="level-item">WORKDIR</span></span></a></li><li><a class="level is-mobile" href="#USER"><span class="level-left"><span class="level-item">3.3.7</span><span class="level-item">USER</span></span></a></li></ul></li></ul></li></ul></div></div><style>#toc .menu-list > li > a.is-active + .menu-list { display: block; }#toc .menu-list > li > a + .menu-list { display: none; }</style><script src="/js/toc.js" defer></script></div></div></div></div></section><footer class="footer"><div class="container"><div class="level"><div class="level-start"><a class="footer-logo is-block mb-2" href="/">Edgar&#039;s Blog</a><p class="is-size-7"><span>&copy; 2024 Edgar</span>  Powered by <a href="https://hexo.io/" target="_blank" rel="noopener">Hexo</a> &amp; <a href="https://github.com/ppoffice/hexo-theme-icarus" target="_blank" rel="noopener">Icarus</a><br><span id="busuanzi_container_site_uv">共 <span id="busuanzi_value_site_uv">0</span> 个访客</span></p></div><div class="level-end"><div class="field has-addons"><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Creative Commons" href="https://creativecommons.org/"><i class="fab fa-creative-commons"></i></a></p><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="Attribution 4.0 International" href="https://creativecommons.org/licenses/by/4.0/"><i class="fab fa-creative-commons-by"></i></a></p><p class="control"><a class="button is-transparent is-large" target="_blank" rel="noopener" title="GitHub" href="https://github.com/junhaideng"><i class="fab fa-github"></i></a></p></div></div></div></div></footer><script src="https://cdn.jsdelivr.net/npm/jquery@3.3.1/dist/jquery.min.js"></script><script src="https://cdn.jsdelivr.net/npm/moment@2.22.2/min/moment-with-locales.min.js"></script><script src="https://cdn.jsdelivr.net/npm/clipboard@2.0.4/dist/clipboard.min.js" defer></script><script>moment.locale("zh-CN");</script><script>var IcarusThemeSettings = {
+            article: {
+                highlight: {
+                    clipboard: true,
+                    fold: 'unfolded'
+                }
+            }
+        };</script><script src="/js/column.js"></script><script src="/js/animation.js"></script><a id="back-to-top" title="回到顶端" href="javascript:;"><i class="fas fa-chevron-up"></i></a><script src="/js/back_to_top.js" defer></script><!--!--><!--!--><!--!--><!--!--><script src="https://cdn.jsdelivr.net/npm/cookieconsent@3.1.1/build/cookieconsent.min.js" defer></script><script>window.addEventListener("load", () => {
+      window.cookieconsent.initialise({
+        type: "info",
+        theme: "edgeless",
+        static: false,
+        position: "bottom-left",
+        content: {
+          message: "此网站使用Cookie来改善您的体验。",
+          dismiss: "知道了！",
+          allow: "允许使用Cookie",
+          deny: "拒绝",
+          link: "了解更多",
+          policy: "Cookie政策",
+          href: "https://www.cookiesandyou.com/",
+        },
+        palette: {
+          popup: {
+            background: "#edeff5",
+            text: "#838391"
+          },
+          button: {
+            background: "#4b81e8"
+          },
+        },
+      });
+    });</script><script src="https://cdn.jsdelivr.net/npm/lightgallery@1.10.0/dist/js/lightgallery.min.js" defer></script><script src="https://cdn.jsdelivr.net/npm/justifiedGallery@3.8.1/dist/js/jquery.justifiedGallery.min.js" defer></script><script>window.addEventListener("load", () => {
+            if (typeof $.fn.lightGallery === 'function') {
+                $('.article').lightGallery({ selector: '.gallery-item' });
+            }
+            if (typeof $.fn.justifiedGallery === 'function') {
+                if ($('.justified-gallery > p > .gallery-item').length) {
+                    $('.justified-gallery > p > .gallery-item').unwrap();
+                }
+                $('.justified-gallery').justifiedGallery();
+            }
+        });</script><!--!--><!--!--><script type="text/x-mathjax-config">MathJax.Hub.Config({
+            'HTML-CSS': {
+                matchFontHeight: false
+            },
+            SVG: {
+                matchFontHeight: false
+            },
+            CommonHTML: {
+                matchFontHeight: false
+            },
+            tex2jax: {
+                inlineMath: [
+                    ['$','$'],
+                    ['\\(','\\)']
+                ]
+            }
+        });</script><script src="https://cdn.jsdelivr.net/npm/mathjax@2.7.9/unpacked/MathJax.js?config=TeX-MML-AM_CHTML" defer></script><!--!--><!--!--><!--!--><script src="/js/main.js" defer></script><div class="searchbox"><div class="searchbox-container"><div class="searchbox-header"><div class="searchbox-input-container"><input class="searchbox-input" type="text" placeholder="想要查找什么..."></div><a class="searchbox-close" href="javascript:;">×</a></div><div class="searchbox-body"></div></div></div><script src="/js/insight.js" defer></script><script>document.addEventListener('DOMContentLoaded', function () {
+            loadInsight({"contentUrl":"/content.json"}, {"hint":"想要查找什么...","untitled":"(无标题)","posts":"文章","pages":"页面","categories":"分类","tags":"标签"});
+        });</script></body></html>
